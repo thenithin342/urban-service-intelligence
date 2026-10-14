@@ -1,14 +1,22 @@
-# Pinned for reproducibility. Primary interpreter: Python 3.13 (this machine).
-# Spark Python-worker ops verified under Python 3.10 + PySpark 3.5.3
-# (see docs/decisions.md). JVM-only Spark ops verified under 3.13 + 4.0.1.
-pyspark==4.0.1
-pandas>=2.0,<4
-numpy>=1.24
-pyarrow>=14
-requests>=2.31
-pyyaml>=6.0
-scikit-learn>=1.3
-plotly>=5.18
-streamlit>=1.32
-pytest>=8.0
-ruff>=0.4
+# Standard environment: Python 3.10 + PySpark 3.5.3 in .venv
+# (see README setup and docs/decisions.md). Exact pins measured via
+# `.venv/Scripts/python.exe -m pip freeze` on 2026-10-14.
+pyspark==3.5.3
+py4j==0.10.9.7
+pandas==2.3.3
+numpy==2.2.6
+pyarrow==25.0.1
+requests==2.34.2
+PyYAML==6.0.3
+scikit-learn==1.7.2
+scipy==1.15.3
+plotly==7.1.0
+streamlit==1.65.0
+pytest==9.1.1
+ruff==0.17.0
+python-dateutil==2.9.0.post0
+pytz==2026.5
+tzdata==2026.5
+click==8.5.0
+joblib==1.6.0
+threadpoolctl==3.7.0

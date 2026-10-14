@@ -1,65 +1,119 @@
-# Urban Service Demand Prediction and Intelligent Resource Allocation
+# Urban Service Intelligence
 
-Research/educational decision-support prototype using NYC 311 Service Requests
-(2020-Present, dataset `erm2-nwe9`). Advisory outputs only, NOT a dispatch tool.
+Scalable analytics prototype for NYC 311 service-request data:
+demand prediction and transparent resource-allocation review.
+Built on NYC Open Data (311 Service Requests from 2020 to Present,
+dataset `erm2-nwe9`). A research and education decision-support
+prototype. Advisory outputs only, NOT a municipal dispatch tool.
 
-## Status
+## Project status
 
-- Phase 0 (repo + env + Spark smoke): implemented, see PROGRESS_PHASE0_PHASE1.md
-- Phase 1 (acquisition + profiling + EDA): implemented, see reports/data_quality.md
-- Phases 2-8: not started (stubs exist for CLI entry points)
+- Phase 0 (repository, environment, Spark smoke test): done.
+  See `PROGRESS_PHASE0_PHASE1.md`.
+- Phase 1 (bounded acquisition, profiling, EDA): done.
+  See `PROGRESS_PHASE0_PHASE1.md` and `reports/data_quality.md`.
+- Phase 2 (PySpark ETL to partitioned Parquet plus a machine-readable
+  quality report): done. See `PROGRESS_PHASE2.md` and
+  `reports/audit_phase2.md`.
+- Phases 3-8 (spatial analysis, pattern mining, forecasting, closure
+  modeling, dashboard depth, benchmarking, final delivery): not started.
+  CLI stubs exist and exit with code 2 until their phase lands.
 
-## Setup (Windows PowerShell)
+## Technology stack
+
+Python 3.10, PySpark 3.5.3 (local mode), Java 17, pandas, pyarrow,
+scikit-learn, Streamlit, pytest, ruff. Exact pinned versions are in
+`requirements.txt`. Parquet is the analytical storage format.
+
+## Setup
+
+Windows PowerShell (primary supported shell):
 
 ```powershell
-# Python 3.13 is the default interpreter on this machine.
-# Full Spark Python-worker ops require Python 3.10 (see docs/decisions.md).
-py -V:3.13 -m venv .venv
+py -V:3.10 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
+If the `py` launcher is unavailable, substitute the Python 3.10
+interpreter path directly
+(`C:\...\Python310\python.exe -m venv .venv`).
+Python 3.13 is not supported: Spark Python workers crash on it
+(see `docs/decisions.md`).
+
 Linux/macOS:
 
 ```bash
-python3.11 -m venv .venv
+python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Java 17 is required for Spark. Verify with `java -version`.
+Prerequisites: Java 17 (`java -version`) and, on Windows only, a
+one-time winutils install outside the repo
+(`C:\hadoop\bin\winutils.exe` + `hadoop.dll` from a Hadoop 3.3.x
+build, `HADOOP_HOME=C:\hadoop`, `C:\hadoop\bin` on PATH).
+`src/utils/spark.py` pins the Spark driver and worker interpreters
+to the running interpreter and auto-discovers `C:\hadoop`, so fresh
+shells work without manual environment configuration.
 
-Spark on Windows: set before running Spark code:
-
-```powershell
-$env:PYSPARK_PYTHON = (Get-Command python).Source
-$env:PYSPARK_DRIVER_PYTHON = (Get-Command python).Source
-```
-
-If Python-worker tasks crash on Python 3.13, re-run Spark Python-worker
-checks with Python 3.10 + PySpark 3.5.3 (verified working on this machine).
-
-## Commands (only those verified below actually work)
+## Usage
 
 ```powershell
-python -m pytest -q
-python scripts/download_sample.py --config configs/sample.yaml
-streamlit run dashboard/app.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe scripts/download_sample.py --config configs/sample.yaml
+.\.venv\Scripts\python.exe scripts/run_etl.py --config configs/sample.yaml
+.\.venv\Scripts\python.exe -m streamlit run dashboard/app.py
 ```
 
-Stubs (return exit code 2 until their phase lands):
-`run_etl.py`, `build_features.py`, `train_models.py`, `benchmark.py`.
+All four commands verified on the standard environment on 2026-10-14:
+33 pytest tests passed; the dashboard additionally smoke-tested
+headless (HTTP 200, no exceptions). `run_etl.py` also accepts
+`--snapshot-date YYYY-MM-DD` and `--master`.
 
-## Data provenance
+## Repository layout
+
+```text
+configs/      Fixed acquisition/ETL windows (sample + full-scale)
+data/         raw/ + processed/ (gitignored); manifests/ (small provenance JSON)
+src/          ingestion, processing, analytics, mining, modeling,
+              prioritization, evaluation, utils
+scripts/      download_sample, run_etl (working); build_features,
+              train_models, benchmark (stubs for later phases)
+tests/        unit/, integration/, fixtures/
+dashboard/    Streamlit app (reads computed artifacts only)
+notebooks/    EDA notebooks (render src/ logic, hold no pipeline code)
+artifacts/    Generated outputs (gitignored)
+reports/      Data-quality, methodology, audit reports
+docs/         Architecture, data dictionary, decisions log
+```
+
+## Data provenance and reproducibility
 
 - Source: https://data.cityofnewyork.us/d/erm2-nwe9
-- Every download writes `data/raw/*.csv` + `data/manifests/manifest_*.json`
-  (URLs, filters, acquisition time, row counts, SHA256, failures).
-- Raw data and artifacts are gitignored. Commit only code + small manifests.
+- Every download writes `data/raw/*.csv` plus
+  `data/manifests/manifest_*.json` (request URLs, filters,
+  acquisition time, row counts, SHA256, failures, source metadata).
+- Raw data, processed data, and artifacts are gitignored. Only code,
+  configs, documentation, small manifests, and test fixtures are
+  committed.
+- Fixed historical `where` windows, stable `$order`, recorded seed
+  (42), deterministic pandas and Spark transformations. Re-running the
+  pipeline over the same inputs reproduces identical outputs
+  (row-hash verified in `reports/audit_phase2.md`).
 
-## Reproducibility
+## Testing
 
-- Fixed historical `where` windows in `configs/*.yaml`, stable `$order`,
-  deterministic pandas groupby/sort, `seed: 42` recorded in manifests.
-- Re-running on the same saved sample yields identical EDA outputs
-  (covered by `test_save_eda_outputs_deterministic`).
+`python -m pytest -q` runs unit tests (ingestion helpers, EDA logic,
+ETL contract, CLI validation), Spark integration tests (real
+Python-worker transformations, ETL edge cases, idempotent reruns),
+and an end-to-end ETL test over the real 100,000-record sample.
+`ruff check src scripts tests` must be clean.
+
+## Limitations
+
+Single-machine local Spark (not a cluster); current sample covers
+2024-01-01 to 2024-01-12; complaint volume measures reporting
+frequency, not infrastructure quality; rankings, when added, will be
+advisory absent real capacity and cost data. See `docs/decisions.md`
+and phase progress reports for the full list.

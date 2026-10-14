@@ -20,9 +20,14 @@ where: "created_date between '2024-01-01T00:00:00' and '2024-03-31T23:59:59'"
 order: unique_key
 target_rows: 500000
 page_size: 50000
-timeout_seconds: 30
-max_retries: 5
+timeout_seconds: 180
+max_retries: 6
 backoff_base_seconds: 1.0
 seed: 42
 out_raw: data/raw/nyc311_default.csv
 out_manifest: data/manifests/manifest_default.json
+eda_outdir: artifacts/eda_default
+# Phase 2 ETL outputs (gitignored processed data).
+input_csv: data/raw/nyc311_default.csv
+etl_output: data/processed/nyc311_clean_default
+etl_quality_report: data/processed/etl_quality_default.json

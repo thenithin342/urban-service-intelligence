@@ -26,7 +26,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if not isinstance(cfg, dict):
-        raise ValueError(f" Config {path} must be a mapping")
+        raise TypeError(f" Config {path} must be a mapping")
     missing = [k for k in REQUIRED_KEYS if k not in cfg]
     if missing:
         raise ValueError(f" Config {path} missing keys: {missing}")

@@ -6,9 +6,10 @@ import csv
 import hashlib
 import json
 import time
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 import requests
 import yaml
@@ -64,7 +65,11 @@ def fetch_page(
     backoff_base: float = 1.0,
     sleep: Callable[[float], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """GET one SODA page with exponential backoff. Returns list of records."""
+    """GET one SODA page with exponential backoff. Returns list of records.
+
+    Retries transient failures (429/5xx, timeouts, malformed JSON).
+    Other 4xx client errors fail fast without retrying.
+    """
     if sleep is None:
         sleep = time.sleep
     last_err: Exception | None = None
@@ -76,12 +81,24 @@ def fetch_page(
                 if not isinstance(data, list):
                     raise ValueError("SODA response is not a JSON array")
                 return data
-            if resp.status_code in (429, 500, 502, 503, 504):
-                last_err = RuntimeError(f"transient HTTP {resp.status_code}")
-            else:
-                resp.raise_for_status()
-        except (requests.RequestException, ValueError, RuntimeError) as e:
+            if resp.status_code == 429 or 500 <= resp.status_code < 600:
+                raise RuntimeError(f"transient HTTP {resp.status_code}")
+            resp.raise_for_status()  # non-retryable 4xx: propagates, no retry
+        except RuntimeError as e:
             last_err = e
+        except ValueError as e:
+            last_err = e
+        except requests.RequestException as e:
+            # HTTPError from raise_for_status carries the response; retry
+            # only if it was transient, else re-raise. Transport errors
+            # with no response (timeouts, DNS) are always retried.
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is None or status == 429 or (
+                isinstance(status, int) and 500 <= status < 600
+            ):
+                last_err = e
+            else:
+                raise
         if attempt < max_retries - 1:
             sleep(backoff_base * (2**attempt))
     raise RuntimeError(f"fetch_page failed after {max_retries} attempts: {last_err}")
@@ -90,12 +107,20 @@ def fetch_page(
 def dedupe_records(
     records: list[dict[str, Any]], key: str = "unique_key"
 ) -> tuple[list[dict[str, Any]], int]:
-    """Dedupe preserving first occurrence. Returns (deduped, n_duplicates)."""
+    """Dedupe preserving first occurrence. Returns (deduped, n_duplicates).
+
+    Records with a missing/blank key pass through untouched: collapsing
+    distinct keyless rows into one "duplicate" would silently drop data.
+    (The ETL excludes and counts keyless rows downstream.)
+    """
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     dups = 0
     for r in records:
-        k = str(r.get(key, ""))
+        k = str(r.get(key, "") or "").strip()
+        if not k:
+            out.append(r)
+            continue
         if k in seen:
             dups += 1
             continue
@@ -166,7 +191,7 @@ def download_sample(
             )
         fetcher = _fetch
 
-    acquired_at = datetime.now(timezone.utc).isoformat()
+    acquired_at = datetime.now(timezone.utc).isoformat()  # noqa: UP017 (py3.10)
     request_log: list[str] = []
     all_records: list[dict[str, Any]] = []
     offset = 0
@@ -182,7 +207,7 @@ def download_sample(
         try:
             _log(f"[download] page {pages + 1}: limit={limit} offset={offset}")
             page = fetcher(params)
-        except Exception as e:  # fatal after retries
+        except Exception as e:  # noqa: BLE001 (injected fetchers raise anything; recorded)
             failures.append(f"offset={offset}: {e}")
             _log(f"[download] FAILED offset={offset}: {e}")
             break

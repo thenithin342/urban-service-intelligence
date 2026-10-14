@@ -10,8 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.ingestion.downloader import download_sample  # noqa: E402
-from src.utils.config import load_config  # noqa: E402
+from src.ingestion.downloader import download_sample
+from src.utils.config import load_config
 
 
 def main() -> int:

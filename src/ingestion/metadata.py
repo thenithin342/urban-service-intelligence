@@ -48,7 +48,7 @@ def save_metadata_snapshot(
     meta = fetch_json(metadata_url, timeout=timeout)
     try:
         cols = fetch_json(columns_url, timeout=timeout)
-    except Exception:
+    except (requests.RequestException, ValueError):
         cols = []
     snapshot = {
         "id": meta.get("id"),

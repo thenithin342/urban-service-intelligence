@@ -80,6 +80,46 @@ def test_dedupe_records():
     assert dups == 1
 
 
+def test_dedupe_keyless_rows_pass_through():
+    recs = [
+        {"unique_key": None},
+        {"unique_key": ""},
+        {"unique_key": "1"},
+        {"unique_key": "1"},
+    ]
+    out, dups = dedupe_records(recs)
+    assert len(out) == 3  # keyless rows never collapse into "duplicates"
+    assert dups == 1
+
+
+def test_fetch_page_client_error_fails_fast():
+    class R404(FakeResp):
+        def raise_for_status(self):
+            resp = requests.Response()
+            resp.status_code = 404
+            raise requests.HTTPError("404 Client Error", response=resp)
+
+    sess = FakeSession([R404(404)])
+    try:
+        fetch_page(sess, "http://x", {}, max_retries=3,
+                   backoff_base=0.0, sleep=lambda s: None)
+    except requests.HTTPError:
+        pass
+    else:
+        raise AssertionError("expected HTTPError")
+    assert sess.calls == 1  # no retries for 404
+
+
+def test_fetch_page_retries_transport_error():
+    sess = FakeSession(
+        [requests.ConnectionError("down"), FakeResp(200, [{"a": 1}])]
+    )
+    out = fetch_page(sess, "http://x", {}, max_retries=3,
+                     backoff_base=0.0, sleep=lambda s: None)
+    assert out == [{"a": 1}]
+    assert sess.calls == 2
+
+
 def test_download_sample_paging_and_manifest(tmp_path):
     pages = [
         [{"unique_key": "1", "borough": "QUEENS"},

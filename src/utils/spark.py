@@ -1,14 +1,35 @@
 """Spark session helper. ASCII only.
 
-Uses JVM-safe defaults for Windows local execution. The caller (or the
-environment) must set PYSPARK_PYTHON / PYSPARK_DRIVER_PYTHON consistently.
-On this machine full Python-worker ops require Python 3.10 (see
-docs/decisions.md); JVM-only ops work on 3.13.
+Standard environment is the project .venv (Python 3.10 + PySpark 3.5.3).
+Driver and worker interpreters are forced to the running interpreter
+unless PYSPARK_PYTHON / PYSPARK_DRIVER_PYTHON are already set, so workers
+always match the driver (see docs/decisions.md).
 """
 
 from __future__ import annotations
 
 import os
+import sys
+
+
+def ensure_worker_env() -> dict[str, str]:
+    """Pin worker/driver python to current interpreter if unset.
+
+    Also defaults HADOOP_HOME/PATH to a local winutils install
+    (C:\\hadoop, one-time setup, see README) so Parquet writes work
+    on Windows without manual env configuration in every shell.
+    """
+    exe = sys.executable
+    os.environ.setdefault("PYSPARK_PYTHON", exe)
+    os.environ.setdefault("PYSPARK_DRIVER_PYTHON", exe)
+    default_home = r"C:\hadoop"
+    if os.path.isfile(os.path.join(default_home, "bin", "winutils.exe")):
+        os.environ.setdefault("HADOOP_HOME", default_home)
+        bindir = os.path.join(default_home, "bin")
+        path = os.environ.get("PATH", "")
+        if bindir.lower() not in path.lower():
+            os.environ["PATH"] = bindir + os.pathsep + path
+    return spark_env_note()
 
 
 def spark_env_note() -> dict[str, str]:
@@ -19,6 +40,7 @@ def spark_env_note() -> dict[str, str]:
 
 
 def get_spark(app_name: str = "urban-service", master: str = "local[2]"):
+    ensure_worker_env()
     from pyspark.sql import SparkSession
 
     builder = (

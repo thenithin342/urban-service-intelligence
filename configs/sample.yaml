@@ -29,3 +29,7 @@ seed: 42
 out_raw: data/raw/nyc311_sample.csv
 out_manifest: data/manifests/manifest_sample.json
 eda_outdir: artifacts/eda_sample
+# Phase 2 ETL outputs (gitignored processed data).
+input_csv: data/raw/nyc311_sample.csv
+etl_output: data/processed/nyc311_clean
+etl_quality_report: data/processed/etl_quality.json
