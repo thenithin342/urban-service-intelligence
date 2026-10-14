@@ -1,0 +1,49 @@
+# Dependencies
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data (never commit raw/large data, credentials, artifacts)
+data/raw/
+data/processed/
+data/sample/*.csv
+data/sample/*.json
+!data/sample/.gitkeep
+artifacts/
+*.parquet
+
+# Manifests: commit only sanitized small metadata (no tokens)
+# data/manifests/*.json committed only if small and sanitized
+
+# Models
+*.pkl
+*.joblib
+mlruns/
+
+# Credentials / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Logs / packaging
+*.log
+*.egg-info/
+dist/
+build/
+
+# Agent harness metadata (local-only, not project code)
+.qodo/
+
+# Caches / OS
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# Java / Spark
+derby.log
+metastore_db/
+spark-warehouse/

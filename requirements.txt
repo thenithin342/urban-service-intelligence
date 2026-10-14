@@ -1,0 +1,14 @@
+# Pinned for reproducibility. Primary interpreter: Python 3.13 (this machine).
+# Spark Python-worker ops verified under Python 3.10 + PySpark 3.5.3
+# (see docs/decisions.md). JVM-only Spark ops verified under 3.13 + 4.0.1.
+pyspark==4.0.1
+pandas>=2.0,<4
+numpy>=1.24
+pyarrow>=14
+requests>=2.31
+pyyaml>=6.0
+scikit-learn>=1.3
+plotly>=5.18
+streamlit>=1.32
+pytest>=8.0
+ruff>=0.4

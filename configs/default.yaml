@@ -1,0 +1,28 @@
+# Default (full-scale) configuration. Values are advisory until verified.
+dataset_id: erm2-nwe9
+base_url: https://data.cityofnewyork.us/resource/erm2-nwe9.json
+metadata_url: https://data.cityofnewyork.us/api/views/erm2-nwe9
+columns_metadata_url: https://data.cityofnewyork.us/api/views/erm2-nwe9/columns.json
+fields:
+  - unique_key
+  - created_date
+  - closed_date
+  - complaint_type
+  - descriptor
+  - agency
+  - status
+  - borough
+  - incident_zip
+  - latitude
+  - longitude
+# Fixed historical window for reproducibility. Adjust after verifying coverage.
+where: "created_date between '2024-01-01T00:00:00' and '2024-03-31T23:59:59'"
+order: unique_key
+target_rows: 500000
+page_size: 50000
+timeout_seconds: 30
+max_retries: 5
+backoff_base_seconds: 1.0
+seed: 42
+out_raw: data/raw/nyc311_default.csv
+out_manifest: data/manifests/manifest_default.json

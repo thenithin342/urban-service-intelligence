@@ -1,0 +1,43 @@
+{
+  "dataset_id": "erm2-nwe9",
+  "acquired_at_utc": "2026-10-14T08:16:32.726752+00:00",
+  "base_url": "https://data.cityofnewyork.us/resource/erm2-nwe9.json",
+  "where": "created_date between '2024-01-01T00:00:00' and '2024-01-31T23:59:59'",
+  "order": "unique_key",
+  "fields": [
+    "unique_key",
+    "created_date",
+    "closed_date",
+    "complaint_type",
+    "descriptor",
+    "agency",
+    "status",
+    "borough",
+    "incident_zip",
+    "latitude",
+    "longitude"
+  ],
+  "target_rows": 100000,
+  "pages_fetched": 2,
+  "rows_received": 100000,
+  "rows_written": 100000,
+  "duplicates_removed": 0,
+  "failures": [],
+  "request_urls_first": [
+    "https://data.cityofnewyork.us/resource/erm2-nwe9.json?%24select=unique_key%2Ccreated_date%2Cclosed_date%2Ccomplaint_type%2Cdescriptor%2Cagency%2Cstatus%2Cborough%2Cincident_zip%2Clatitude%2Clongitude&%24limit=50000&%24offset=0&%24where=created_date+between+%272024-01-01T00%3A00%3A00%27+and+%272024-01-31T23%3A59%3A59%27&%24order=unique_key",
+    "https://data.cityofnewyork.us/resource/erm2-nwe9.json?%24select=unique_key%2Ccreated_date%2Cclosed_date%2Ccomplaint_type%2Cdescriptor%2Cagency%2Cstatus%2Cborough%2Cincident_zip%2Clatitude%2Clongitude&%24limit=50000&%24offset=50000&%24where=created_date+between+%272024-01-01T00%3A00%3A00%27+and+%272024-01-31T23%3A59%3A59%27&%24order=unique_key"
+  ],
+  "request_urls_last": [
+    "https://data.cityofnewyork.us/resource/erm2-nwe9.json?%24select=unique_key%2Ccreated_date%2Cclosed_date%2Ccomplaint_type%2Cdescriptor%2Cagency%2Cstatus%2Cborough%2Cincident_zip%2Clatitude%2Clongitude&%24limit=50000&%24offset=0&%24where=created_date+between+%272024-01-01T00%3A00%3A00%27+and+%272024-01-31T23%3A59%3A59%27&%24order=unique_key",
+    "https://data.cityofnewyork.us/resource/erm2-nwe9.json?%24select=unique_key%2Ccreated_date%2Cclosed_date%2Ccomplaint_type%2Cdescriptor%2Cagency%2Cstatus%2Cborough%2Cincident_zip%2Clatitude%2Clongitude&%24limit=50000&%24offset=50000&%24where=created_date+between+%272024-01-01T00%3A00%3A00%27+and+%272024-01-31T23%3A59%3A59%27&%24order=unique_key"
+  ],
+  "request_count": 2,
+  "file": "data/raw/nyc311_sample.csv",
+  "sha256": "7ed7541b56fa816459280483cf0d52f9d98b05bf34e884fc113afb87feafb652",
+  "source_metadata": {
+    "name": "311 Service Requests from 2020 to Present",
+    "rowsUpdatedAt": 1791942200,
+    "viewLastModified": 1767021900
+  },
+  "seed": 42
+}

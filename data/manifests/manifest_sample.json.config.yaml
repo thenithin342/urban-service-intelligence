@@ -1,0 +1,27 @@
+dataset_id: erm2-nwe9
+base_url: https://data.cityofnewyork.us/resource/erm2-nwe9.json
+metadata_url: https://data.cityofnewyork.us/api/views/erm2-nwe9
+columns_metadata_url: https://data.cityofnewyork.us/api/views/erm2-nwe9/columns.json
+fields:
+- unique_key
+- created_date
+- closed_date
+- complaint_type
+- descriptor
+- agency
+- status
+- borough
+- incident_zip
+- latitude
+- longitude
+where: created_date between '2024-01-01T00:00:00' and '2024-01-31T23:59:59'
+order: unique_key
+target_rows: 100000
+page_size: 50000
+timeout_seconds: 180
+max_retries: 6
+backoff_base_seconds: 1.0
+seed: 42
+out_raw: data/raw/nyc311_sample.csv
+out_manifest: data/manifests/manifest_sample.json
+eda_outdir: artifacts/eda_sample
