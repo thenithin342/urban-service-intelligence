@@ -1,0 +1,26 @@
+[
+  {
+    "borough":"BROOKLYN",
+    "complaint_count":32470
+  },
+  {
+    "borough":"QUEENS",
+    "complaint_count":22836
+  },
+  {
+    "borough":"BRONX",
+    "complaint_count":20995
+  },
+  {
+    "borough":"MANHATTAN",
+    "complaint_count":20092
+  },
+  {
+    "borough":"STATEN ISLAND",
+    "complaint_count":3527
+  },
+  {
+    "borough":null,
+    "complaint_count":80
+  }
+]

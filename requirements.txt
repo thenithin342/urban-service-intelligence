@@ -10,6 +10,9 @@ requests==2.34.2
 PyYAML==6.0.3
 scikit-learn==1.7.2
 scipy==1.15.3
+# matplotlib added in Member 1 Phase 3 for report-ready static (PNG)
+# figures; plotly remains for the interactive geospatial HTML map.
+matplotlib==3.10.9
 plotly==7.1.0
 streamlit==1.65.0
 pytest==9.1.1

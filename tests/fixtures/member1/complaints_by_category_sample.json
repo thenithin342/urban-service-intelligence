@@ -1,0 +1,42 @@
+[
+  {
+    "complaint_type":"Illegal Parking",
+    "complaint_count":15450
+  },
+  {
+    "complaint_type":"HEAT\/HOT WATER",
+    "complaint_count":14706
+  },
+  {
+    "complaint_type":"Noise - Residential",
+    "complaint_count":7846
+  },
+  {
+    "complaint_type":"Blocked Driveway",
+    "complaint_count":5504
+  },
+  {
+    "complaint_type":"UNSANITARY CONDITION",
+    "complaint_count":3905
+  },
+  {
+    "complaint_type":"PAINT\/PLASTER",
+    "complaint_count":2535
+  },
+  {
+    "complaint_type":"WATER LEAK",
+    "complaint_count":2420
+  },
+  {
+    "complaint_type":"Abandoned Vehicle",
+    "complaint_count":2393
+  },
+  {
+    "complaint_type":"PLUMBING",
+    "complaint_count":2328
+  },
+  {
+    "complaint_type":"DOOR\/WINDOW",
+    "complaint_count":1771
+  }
+]

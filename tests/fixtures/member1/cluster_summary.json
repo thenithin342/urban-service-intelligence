@@ -1,0 +1,28 @@
+[
+  {
+    "cluster":0,
+    "cells":664,
+    "complaints":93956,
+    "center_x_m":6447.87,
+    "center_y_m":3803.48,
+    "mean_complaints_per_cell":141.5,
+    "mean_resolution_hours":359.002,
+    "center_lat":40.7344,
+    "center_lon":-73.8736,
+    "dominant_borough":"QUEENS",
+    "dominant_complaint":"Illegal Parking"
+  },
+  {
+    "cluster":1,
+    "cells":209,
+    "complaints":4727,
+    "center_x_m":-12427.14,
+    "center_y_m":-12435.61,
+    "mean_complaints_per_cell":22.617,
+    "mean_resolution_hours":606.109,
+    "center_lat":40.58754,
+    "center_lon":-74.09725,
+    "dominant_borough":"STATEN ISLAND",
+    "dominant_complaint":"Illegal Parking"
+  }
+]
