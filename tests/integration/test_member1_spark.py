@@ -258,3 +258,46 @@ def test_dbscan_on_synthetic_clusters():
     assert set(labelled["cluster"]) == {0, 1}
     assert summary["n_clusters_excluding_noise"] == 2
     assert summary["noise_points"] == 0
+
+
+def test_hour_weekday_heatmap_normalized(spark, fixture_df):
+    hm = spark_eda.hour_weekday_heatmap(fixture_df).collect()
+    assert len(hm) > 0
+    first = hm[0]
+    assert "complaint_count" in first
+    assert "days_observed" in first
+    assert "avg_complaints_per_hour" in first
+    for r in hm:
+        assert r["days_observed"] >= 1
+        assert r["avg_complaints_per_hour"] == round(r["complaint_count"] / r["days_observed"], 2)
+
+
+def test_spark_resolution_histogram_and_box_stats(spark, fixture_df):
+    hist_sdf, summary = spark_eda.resolution_histogram_spark(fixture_df, n_bins=10)
+    hist_rows = hist_sdf.collect()
+    assert len(hist_rows) <= 10
+    total_binned = sum(r["count"] for r in hist_rows)
+    assert total_binned == summary["resolved_rows"]
+    assert "median_hours" in summary
+    assert "p90_hours" in summary
+    assert "p99_hours" in summary
+
+    box_sdf = spark_eda.resolution_box_stats_spark(fixture_df)
+    box_rows = box_sdf.collect()
+    assert len(box_rows) >= 1
+    for r in box_rows:
+        assert r["resolved_rows"] >= 1
+        assert r["min_hours"] <= r["q1"] <= r["med"] <= r["q3"] <= r["max_hours"]
+
+
+def test_time_coverage_expanded_metrics(spark, fixture_df):
+    cov = spark_eda.time_coverage(fixture_df)
+    assert cov["period_start"] == "2024-01-01"
+    assert cov["period_end"] == "2024-01-05"
+    assert cov["observed_span_days"] == 5
+    assert cov["observed_span_completeness"] == 1.0
+    assert "month_coverage_ratio" in cov
+    assert "full_days_count" in cov
+    assert "partial_days_count" in cov
+    assert cov["month_coverage_ratio"] == round(5 / 31, 4)
+

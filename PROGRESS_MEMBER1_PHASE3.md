@@ -115,12 +115,12 @@
   10. DOOR/WINDOW: 1,771 (1.77%)
 - **Diurnal Periodicity (`hour_weekday`):**
   - Trough: 03:00–05:00 AM (< 150 complaints/h).
-  - Peak: Wednesday 11:00 AM (1,443 complaints).
+  - Peak: Wednesday 11:00 AM with 721.5 normalized avg complaints/h (1,443 total across the two observed Wednesdays).
 - **Resolution Quantiles ($N=98,877$ resolved, nonnegative durations):**
   - Mean: 340.1838 h (~14.17 days).
   - Median: 15.6103 h (~15.61 hours).
-  - $P_{90}$: 699.3587 h (~29.14 days).
-  - $P_{99}$: 6,973.4673 h (~290.56 days).
+  - $P_{90}$: 699.3587 h (~29.14 days) (Spark approx: 698.26 h).
+  - $P_{99}$: 6,973.4673 h (~290.56 days) (Spark approx: 6,912.99 h).
   - Max: 23,639.3667 h (~984.97 days).
   - Queens exhibits fastest median resolution (6.87 h); UNKNOWN tickets take longest (median 191.74 h).
   - Zero-duration resolutions (`created_at == closed_at`): 1,335 rows.
@@ -128,7 +128,7 @@
 - **Geospatial Hotspots:**
   - 873 active cells in NYC bounding box ($40.49..40.92^\circ\text{N}, -74.26..-73.70^\circ\text{W}$).
   - 462 hotspot cells have $\ge 50$ complaints.
-  - Top hotspot cell `25:31` (Crown Heights / Bed-Stuy, Brooklyn, $40.745^\circ\text{N}, -73.945^\circ\text{W}$) recorded 2,842 complaints ($3,046 \text{ complaints/km}^2$).
+  - Top hotspot cell `25:31` (Long Island City / Sunnyside, Queens, $40.745^\circ\text{N}, -73.945^\circ\text{W}$; dominant borough `QUEENS`) recorded 2,842 complaints ($3,046 \text{ complaints/km}^2$).
 
 ---
 
@@ -166,28 +166,28 @@ Evaluated on bounded 20,000 valid coordinate points ($\text{min\_pts}=25$):
 All figures saved under `artifacts/member1/analytics/figures/`:
 1. `borough_bar.png`: Brooklyn has the most reported complaints (32,470 of 100,000); counts are reporting frequency, not infrastructure quality.
 2. `category_bar.png`: 'Illegal Parking' is the most reported category (15,450 records) in this window.
-3. `daily_timeseries.png`: Daily volume averages 8,333 records with a range of 191-11,006; the window is too short for seasonal claims.
+3. `daily_timeseries.png`: Full-day volume (Jan 1-11, 11 days) averages 9,074 records/day (range 6,703-11,006); all 12 days including partial Jan 12 (191 records) average 8,333.
 4. `daily_by_borough.png`: Brooklyn contributes the largest share of daily volume (32.5% of records in window).
-5. `hour_weekday_heatmap.png`: Peak cell is Wednesday 11:00 (1,443 records); reporting has clear time-of-day structure.
+5. `hour_weekday_heatmap.png`: Peak cell is Wednesday 11:00 (721.5 avg records/h, normalized for observed weekday count); reporting has clear diurnal structure.
 6. `daily_kde.png`: Daily volume is centred near 9,524 records/day; KDE is a smoothing of the observed days only.
 7. `daily_violin.png`: Violins show the spread of daily volume within each borough; wide spreads mean unstable daily demand, not higher counts.
-8. `resolution_hist.png`: Median resolution is 15.6 h (p90 699.4 h, p99 6973.5 h); unresolved rows are excluded, not zero-filled.
+8. `resolution_hist.png`: Median resolution is 15.6 h (p90 698.3 h, p99 6913.0 h); unresolved rows are excluded, not zero-filled.
 9. `resolution_box.png`: Median resolution is highest in UNKNOWN (191.7 h) among boroughs; box plots use resolved rows only and hide outliers.
 10. `borough_radar.png`: Radar compares only normalised category shares per borough; a longer spoke means a larger share of that borough's own volume, not more records.
 11. `kmeans_silhouette.png`: Best silhouette 0.599 at k=2; silhouette alone does not prove cluster meaning.
 12. `kmeans_clusters.png`: 2 cluster centres shown over valid coordinates; clusters are descriptive reporting-intensity groups, not risk labels.
 13. `dbscan_clusters.png`: DBSCAN found 103 dense clusters with 59.9% noise on a bounded sample; it is single-node, not distributed, and eps is in metres.
 14. `dbscan_sensitivity.png`: At eps=100 m noise is 92.8% with 30 clusters; larger eps merges points and reduces noise, showing that the density result is parameter-dependent.
-15. `hotspot_map.html`: 462 grid cells with >= threshold records; darker/larger = more reported complaints (counts, not population-adjusted rates).
+15. `hotspot_map.html`: 462 grid cells with >= threshold records; top cell 25:31 located in Long Island City / Sunnyside, Queens (40.745, -73.945).
 
 ---
 
 ## 7. Quality Assurance & Test Verification
 
 - **Linting:** `ruff check src scripts tests` passed with 0 findings.
-- **Unit Tests:** `tests/unit/test_member1_analytics.py` (6 passed).
-- **Integration Tests:** `tests/integration/test_member1_spark.py` (11 passed).
-- **Total Test Suite:** 56 passed out of 56 tests across the entire repository.
+- **Unit Tests:** `tests/unit/test_member1_analytics.py` (10 passed, +4 regression tests).
+- **Integration Tests:** `tests/integration/test_member1_spark.py` (14 passed, +3 regression tests).
+- **Total Test Suite:** 63 passed out of 63 tests across the entire repository.
 - **Python Worker Verification:** Spark Python-worker tasks (`createDataFrame`, UDFs, shuffle groupBys, RDD maps) successfully execute under Python 3.10.0 + PySpark 3.5.3 with local winutils on Windows.
 
 ---
@@ -199,11 +199,14 @@ All figures saved under `artifacts/member1/analytics/figures/`:
 
 ---
 
-## 9. Blocker & Discrepancy Resolution
+## 9. Blocker & Review Findings Resolution
 
-- **Resolution Sampling Bug Resolved:** In `scripts/run_member1_analytics.py`, removed the 20k sampling constraint for resolution figures so all 98,877 resolved rows are analyzed. Re-ran pipeline to produce exact quantiles in `phase3_manifest.json`.
-- **Narrative Reporting Inconsistencies Resolved:** All borough counts, category frequencies, resolution quantiles, and cluster summaries across all documentation now reconcile with the underlying verified Parquet tables and Phase 1 numbers.
-- **Comprehensive Audit Log Created:** Full lineage and verification steps documented in [`reports/member1/phase3_correctness_audit.md`](file:///c:/Users/theni/OneDrive/Documents/projects/asbd_project/reports/member1/phase3_correctness_audit.md).
+- **Hotspot Cell 25:31 Labeling Corrected:** Verified and corrected geographic description of cell `25:31` ($40.745^\circ\text{N}, -73.945^\circ\text{W}$, `dominant_borough`: `QUEENS`) to Long Island City / Sunnyside, Queens (was mislabeled as Crown Heights/Bed-Stuy).
+- **Weekday-Hour Heatmap Normalized:** Updated `hour_weekday` to calculate `days_observed` and `avg_complaints_per_hour` per (weekday, hour) pair. The heatmap now plots normalized hourly rates, preventing 2 observed Wednesdays from appearing twice as intense as 1 observed Saturday/Sunday.
+- **Demand Averages Separate Complete Days:** Daily demand now explicitly reports both the 11 complete days (Jan 1–11: 9,074 complaints/day, range 6,703-11,006) and the overall 12-day arithmetic average (8,333 complaints/day including the 191 records from partial Jan 12).
+- **Scalable Spark Resolution Statistics:** Replaced driver-side raw row collection with distributed Spark bucketing (`resolution_histogram_spark`, 50 rows) and Spark five-number summary statistics (`resolution_box_stats_spark`, 6 rows). Zero raw resolved records are collected on the driver.
+- **Coverage Terminology Clarified:** Replaced ambiguous `coverage_ratio: 1.0` with explicit `observed_span_completeness: 1.0` (Jan 1–12 window completeness) and `month_coverage_ratio: 0.3871` (38.71% of January 2024, or 35.48% for full days).
+- **Audit Lineage Documented:** Lineage and verification steps recorded in [`reports/member1/phase3_correctness_audit.md`](file:///c:/Users/theni/OneDrive/Documents/projects/asbd_project/reports/member1/phase3_correctness_audit.md).
 
 ---
 

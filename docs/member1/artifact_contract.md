@@ -130,7 +130,9 @@ Metadata and metrics are emitted as machine-readable JSON:
   | :--- | :--- | :--- | :--- |
   | `weekday` | `string` | No | `Monday` through `Sunday` |
   | `hour` | `int` | No | Integer hour `0`..`23` |
-  | `complaint_count` | `bigint` | No | Complaint count |
+  | `complaint_count` | `bigint` | No | Total complaint count |
+  | `days_observed` | `bigint` | No | Number of distinct calendar dates observed for this (weekday, hour) |
+  | `avg_complaints_per_hour` | `double` | No | Average complaints per hour normalized for observed weekday frequency |
 
 ### 3.10. `resolution_by_borough`
 - **Path:** `artifacts/member1/analytics/tables/resolution_by_borough`
@@ -242,19 +244,19 @@ Member 3 can embed these visual artifacts directly in Streamlit tabs or markdown
 | :--- | :--- | :--- | :--- |
 | `borough_bar` | `figures/borough_bar.png` | PNG | Brooklyn leads reporting volume (32,470 / 100k records). |
 | `category_bar` | `figures/category_bar.png` | PNG | 'Illegal Parking' (15,450) and 'HEAT/HOT WATER' (14,706) lead categories. |
-| `daily_timeseries` | `figures/daily_timeseries.png` | PNG | Daily volume ranges 191 to 11,006; 12-day window prevents seasonal claims. |
+| `daily_timeseries` | `figures/daily_timeseries.png` | PNG | Full-day volume (Jan 1-11, 11 days) averages 9,074 records/day (range 6,703-11,006); all 12 days including partial Jan 12 (191 records) average 8,333. |
 | `daily_by_borough` | `figures/daily_by_borough.png` | PNG | Borough proportions remain stable across daily fluctuations. |
-| `hour_weekday_heatmap` | `figures/hour_weekday_heatmap.png` | PNG | Peak reporting occurs Wednesday 11:00 AM (1,443 records). |
+| `hour_weekday_heatmap` | `figures/hour_weekday_heatmap.png` | PNG | Peak cell is Wednesday 11:00 (721.5 avg records/h, normalized for observed weekday count). |
 | `daily_kde` | `figures/daily_kde.png` | PNG | Volume distribution smoothed around mode of ~9,524 complaints/day. |
 | `daily_violin` | `figures/daily_violin.png` | PNG | Displays intra-borough variance in daily volume. |
-| `resolution_hist` | `figures/resolution_hist.png` | PNG | Heavily right-skewed; median resolution is 15.6 h (p90 699.4 h, p99 6973.5 h). |
+| `resolution_hist` | `figures/resolution_hist.png` | PNG | Heavily right-skewed; median resolution is 15.6 h (p90 698.3 h, p99 6913.0 h); unresolved rows excluded. |
 | `resolution_box` | `figures/resolution_box.png` | PNG | Median resolution is highest in UNKNOWN (191.7 h) among boroughs; box plots use resolved rows only and hide outliers. |
 | `borough_radar` | `figures/borough_radar.png` | PNG | Normalised category composition profile by borough. |
 | `kmeans_silhouette` | `figures/kmeans_silhouette.png` | PNG | Silhouette curve across k=2..8; highest at k=2 (0.599). |
 | `kmeans_clusters` | `figures/kmeans_clusters.png` | PNG | Centroid locations and cell assignments in NYC space. |
 | `dbscan_clusters` | `figures/dbscan_clusters.png` | PNG | 103 micro-clusters detected on bounded sample (59.9% noise). |
 | `dbscan_sensitivity` | `figures/dbscan_sensitivity.png` | PNG | Sweep across eps=100m, 250m, 500m, 1000m showing cluster vs noise trade-off. |
-| `hotspot_map` | `figures/hotspot_map.html` | HTML | Interactive Leaflet/Plotly map of 462 density cells. |
+| `hotspot_map` | `figures/hotspot_map.html` | HTML | Interactive map of 462 density cells; top cell 25:31 in Long Island City / Sunnyside, Queens (40.745, -73.945). |
 
 ---
 

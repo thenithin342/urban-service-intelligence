@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pyspark.sql import functions as F
+import numpy as np
 
 from src.analytics import clustering, figures, geospatial, spark_eda
 from src.analytics.member1_config import member1_config
@@ -194,28 +194,41 @@ def main(argv: list[str] | None = None) -> int:
             _fig("daily_kde", figures.kde_daily_volume(pand["complaints_daily"], figures_dir / "daily_kde.png", period, producer), notes, meta)
             _fig("daily_violin", figures.violin_daily_by_borough(pand["complaints_daily_borough"], figures_dir / "daily_violin.png", period, producer), notes, meta)
 
-            # Resolution figures use ALL resolved rows (resolution_hours IS NOT NULL).
-            # This is ~98,877 rows — small enough to collect safely (max_collect_rows
-            # is 20k, but this frame is a narrow 3-column select, not raw records).
-            # Using a 20k deterministic sample here was the bug that caused incorrect
-            # mean/p90/p99 values in the Phase 3 manifest and progress reports.
-            resolved_sdf = (
-                df.filter(F.col("resolution_hours").isNotNull())
-                .select("unique_key", "resolution_hours", "borough")
+            # Scalable Spark population statistics: histogram and boxplot are computed
+            # inside Spark, returning only 50 bin rows and 6 borough summary rows to the driver.
+            # Zero raw resolution rows are collected on the driver.
+            hist_sdf, res_summary = spark_eda.resolution_histogram_spark(df, n_bins=50)
+            box_sdf = spark_eda.resolution_box_stats_spark(df)
+            hist_pd = hist_sdf.toPandas()
+            box_pd = box_sdf.toPandas()
+            iqr = box_pd["q3"] - box_pd["q1"]
+            box_pd["whislo"] = np.maximum(0.1, box_pd["q1"] - 1.5 * iqr)
+            box_pd["whishi"] = np.minimum(box_pd["max_hours"], box_pd["q3"] + 1.5 * iqr)
+
+            _fig(
+                "resolution_hist",
+                figures.histogram_resolution(
+                    hist_pd, figures_dir / "resolution_hist.png", period, producer, summary=res_summary
+                ),
+                notes,
+                meta,
             )
-            resolved_n = resolved_sdf.count()
-            # Safety guard: if resolved rows exceed 200k, sample. Otherwise collect all.
-            _RESOLVED_COLLECT_CAP = 200_000
-            if resolved_n > _RESOLVED_COLLECT_CAP:
-                resolved = spark_eda.bounded_pandas(
-                    geospatial.deterministic_sample(resolved_sdf, _RESOLVED_COLLECT_CAP),
-                    _RESOLVED_COLLECT_CAP,
-                )
-            else:
-                resolved = resolved_sdf.toPandas()
-            _fig("resolution_hist", figures.histogram_resolution(resolved, figures_dir / "resolution_hist.png", period, producer), notes, meta)
-            _fig("resolution_box", figures.box_resolution_by_borough(resolved, figures_dir / "resolution_box.png", period, producer), notes, meta)
-            _fig("borough_radar", figures.radar_borough_profile(pand["borough_category"], figures_dir / "borough_radar.png", period, producer), notes, meta)
+            _fig(
+                "resolution_box",
+                figures.box_resolution_by_borough(
+                    box_pd, figures_dir / "resolution_box.png", period, producer
+                ),
+                notes,
+                meta,
+            )
+            _fig(
+                "borough_radar",
+                figures.radar_borough_profile(
+                    pand["borough_category"], figures_dir / "borough_radar.png", period, producer
+                ),
+                notes,
+                meta,
+            )
 
             if scored:
                 sel = [m for m in chosen.get("k_metrics", [])]

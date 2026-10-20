@@ -274,3 +274,47 @@ The test suite and static analysis were executed using the dedicated `.venv` Pyt
 - **Sample Scope:** The dataset represents the first 100,000 records of January 2024 (January 1–12), ordered by `unique_key`. Seasonal cycles and long-term trends cannot be derived until Phase 4 expands historical coverage.
 - **Compute Architecture:** Spark runs in `local[2]` mode on Windows. DBSCAN runs as single-node Scikit-Learn.
 - **Phase 3 Acceptance:** **PASS**. All numerical inconsistencies are resolved, verified, and backed by reproducible code.
+
+---
+
+## 10. Audit Addendum: Resolution of Review Findings
+
+Following the initial audit review, five additional methodological improvements were implemented and verified with regression tests:
+
+### 10.1. Geographical Label of Hotspot Cell 25:31 Corrected
+- **Issue:** Hotspot cell `25:31` was previously referred to as Crown Heights / Bed-Stuy, Brooklyn in report prose.
+- **Verification:** Center coordinates $40.745^\circ\text{N}, -73.945^\circ\text{W}$ are located in Long Island City / Sunnyside, Queens. The underlying Spark table `spatial_grid_cells` correctly identifies `dominant_borough: QUEENS`.
+- **Correction:** Prose updated across all reports and documentation to **Long Island City / Sunnyside, Queens**. Regression unit test `test_hotspot_cell_25_31_queens_geographic_label` added.
+
+### 10.2. Weekday-Hour Heatmap Normalized for Observed Frequency
+- **Issue:** In a 12-day sample (Jan 1–12, 2024), Mondays through Thursdays occur twice, whereas Saturday and Sunday occur only once, and Friday Jan 12 is truncated (hours 0..1). Raw counts make weekdays appear twice as busy as weekends purely due to calendar frequency.
+- **Correction:** In `src/analytics/spark_eda.py`, `hour_weekday_heatmap()` now calculates `days_observed` and `avg_complaints_per_hour = round(complaint_count / days_observed, 2)`.
+- **Visualization:** `figures.py::heatmap_hour_weekday` plots normalized hourly rates. Takeaway updated: Peak normalized hourly rate is Wednesday 11:00 AM with **721.5 average records/hour** across the 2 observed Wednesdays. Regression test `test_hour_weekday_heatmap_normalized` added.
+
+### 10.3. Demand Averages Separate Complete vs. Truncated Days
+- **Issue:** January 12 contains only 191 records spanning 1.33 hours before API cutoff, artificially lowering the arithmetic daily mean.
+- **Correction:** `spark_eda.py::time_coverage` and `figures.py::timeseries_daily` now report both:
+  - **11 complete days (Jan 1–11):** 99,809 complaints, averaging **9,074 complaints/day** (range 6,703 to 11,006).
+  - **All 12 days (including partial Jan 12):** 100,000 complaints, averaging **8,333 complaints/day**.
+  - `timeseries_daily.png` marks Jan 12 distinctly with a red square and annotation. Regression test `test_timeseries_daily_distinguishes_partial_day` added.
+
+### 10.4. Scalable Spark Population Statistics Replacing Driver Row Collection
+- **Issue:** Collecting all 98,877 resolved rows to pandas on the driver creates an architectural vulnerability that would cause `OutOfMemoryError` on production multi-million row datasets.
+- **Correction:** Implemented distributed Spark aggregation functions:
+  - `resolution_histogram_spark(df, n_bins=50)`: buckets rows in Spark, returning a 50-row DataFrame (`bin_start`, `bin_end`, `count`) to the driver.
+  - `resolution_box_stats_spark(df)`: computes exact five-number summary statistics (`q1`, `med`, `q3`, `whislo`, `whishi`, `mean_hours`) per borough in Spark, returning a 6-row DataFrame to the driver.
+  - `figures.py::histogram_resolution` and `box_resolution_by_borough` render directly via `ax.bar` and `ax.bxp`.
+  - **Zero raw resolution rows are collected on the driver.** Bounded collection guards strictly respected. Regression test `test_spark_resolution_histogram_and_box_stats` added.
+
+### 10.5. Temporal Coverage Terminology Clarified
+- **Issue:** Reporting `coverage_ratio: 1.0` was misleading because the dataset only covers 12 days of January 2024, not the full 31-day month.
+- **Correction:** `spark_eda.py::time_coverage` now provides unambiguous metrics:
+  - `observed_span_days`: 12
+  - `observed_span_completeness`: 1.0 (all 12 calendar days in observed span have $\ge 1$ record)
+  - `full_days_count`: 11
+  - `partial_days_count`: 1 (Jan 12)
+  - `target_calendar_month`: "2024-01" (31 days)
+  - `month_coverage_ratio`: **0.3871** (38.71% of January 2024)
+  - `full_day_month_coverage_ratio`: **0.3548** (35.48% of January 2024)
+  - Explicit note documenting that this is an incomplete 12-day sample of January 2024. Regression test `test_time_coverage_expanded_metrics` added.
+

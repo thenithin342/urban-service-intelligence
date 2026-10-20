@@ -206,18 +206,28 @@ def complaints_weekly(df: DataFrame) -> DataFrame:
 
 
 def hour_weekday_heatmap(df: DataFrame) -> DataFrame:
-    """Long-format hour x weekday counts (weekday ordered Mon..Sun)."""
+    """Long-format hour x weekday counts and normalized average complaints per hour.
+
+    Normalization accounts for the number of distinct calendar dates observed for
+    each (weekday, hour) pair (e.g., 2 Wednesdays vs 1 Saturday/Sunday in a 12-day
+    window, and partial cutoff on Friday Jan 12).
+    """
     idx = F.lit(len(WEEKDAY_ORDER))
     for i, day in enumerate(WEEKDAY_ORDER, start=1):
         idx = F.when(F.col("weekday") == day, F.lit(i)).otherwise(idx)
     return (
         df.filter(F.col("created_at").isNotNull())
         .groupBy("weekday", "hour")
-        .count()
+        .agg(
+            F.count(F.lit(1)).alias("complaint_count"),
+            F.countDistinct("created_day").alias("days_observed"),
+            F.round(F.count(F.lit(1)) / F.countDistinct("created_day"), 2).alias(
+                "avg_complaints_per_hour"
+            ),
+        )
         .withColumn("_wd", idx)
         .orderBy("_wd", "hour")
         .drop("_wd")
-        .withColumnRenamed("count", "complaint_count")
     )
 
 
@@ -225,7 +235,7 @@ def resolution_by_borough(df: DataFrame) -> DataFrame:
     """Resolution-hour quantiles over *resolved* rows only (null excluded)."""
     return (
         df.filter(F.col("resolution_hours").isNotNull())
-        .groupBy("borough")
+        .groupBy(F.coalesce(F.col("borough"), F.lit("UNKNOWN")).alias("borough"))
         .agg(
             F.count(F.lit(1)).alias("resolved_rows"),
             F.round(F.mean("resolution_hours"), 3).alias("mean_hours"),
@@ -244,19 +254,131 @@ def resolution_by_borough(df: DataFrame) -> DataFrame:
     )
 
 
+def resolution_overall_stats(df: DataFrame) -> dict[str, Any]:
+    """Scalable Spark population statistics across all resolved rows."""
+    resolved = df.filter(F.col("resolution_hours").isNotNull())
+    row = resolved.agg(
+        F.count(F.lit(1)).alias("resolved_rows"),
+        F.round(F.mean("resolution_hours"), 4).alias("mean_hours"),
+        F.round(F.expr("percentile_approx(resolution_hours, 0.5)"), 4).alias("median_hours"),
+        F.round(F.expr("percentile_approx(resolution_hours, 0.9)"), 4).alias("p90_hours"),
+        F.round(F.expr("percentile_approx(resolution_hours, 0.99)"), 4).alias("p99_hours"),
+        F.round(F.max("resolution_hours"), 4).alias("max_hours"),
+        F.round(F.min("resolution_hours"), 4).alias("min_hours"),
+        F.sum(F.when(F.col("resolution_hours") == 0, 1).otherwise(0)).alias("zero_duration_rows"),
+    ).collect()[0]
+    return {k: (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v) for k, v in row.asDict().items()}
+
+
+def resolution_histogram_spark(
+    df: DataFrame, n_bins: int = 50
+) -> tuple[DataFrame, dict[str, Any]]:
+    """Distributed Spark histogram computation clipped at 99th percentile.
+
+    Computes bins inside Spark so only a tiny n_bins-row table (<=50 rows)
+    is collected to the driver, never millions of raw rows.
+    """
+    resolved = df.filter(F.col("resolution_hours").isNotNull())
+    summary = resolution_overall_stats(df)
+    p99 = float(summary.get("p99_hours") or 1.0)
+    bin_width = max(p99 / n_bins, 1e-6)
+
+    clipped = resolved.withColumn(
+        "_v",
+        F.when(F.col("resolution_hours") > p99, F.lit(p99)).otherwise(
+            F.col("resolution_hours")
+        ),
+    )
+    b_idx = F.floor(F.col("_v") / F.lit(bin_width)).cast("int")
+    b_idx = F.when(b_idx >= n_bins, F.lit(n_bins - 1)).otherwise(b_idx)
+
+    hist_sdf = (
+        clipped.withColumn("bin_idx", b_idx)
+        .groupBy("bin_idx")
+        .count()
+        .withColumn("bin_start", F.round(F.col("bin_idx") * F.lit(bin_width), 3))
+        .withColumn("bin_end", F.round((F.col("bin_idx") + 1) * F.lit(bin_width), 3))
+        .orderBy("bin_idx")
+    )
+    return hist_sdf, summary
+
+
+def resolution_box_stats_spark(df: DataFrame) -> DataFrame:
+    """Scalable Spark boxplot statistics per borough.
+
+    Returns a 6-row DataFrame with exact five-number summary statistics
+    for rendering via matplotlib's ax.bxp without driver row collection.
+    """
+    resolved = df.filter(F.col("resolution_hours").isNotNull())
+    return (
+        resolved.groupBy(
+            F.coalesce(F.col("borough"), F.lit("UNKNOWN")).alias("borough")
+        )
+        .agg(
+            F.count(F.lit(1)).alias("resolved_rows"),
+            F.round(F.mean("resolution_hours"), 2).alias("mean_hours"),
+            F.round(F.min("resolution_hours"), 2).alias("min_hours"),
+            F.round(F.expr("percentile_approx(resolution_hours, 0.25)"), 2).alias("q1"),
+            F.round(F.expr("percentile_approx(resolution_hours, 0.5)"), 2).alias("med"),
+            F.round(F.expr("percentile_approx(resolution_hours, 0.75)"), 2).alias("q3"),
+            F.round(F.max("resolution_hours"), 2).alias("max_hours"),
+        )
+        .orderBy("borough")
+    )
+
+
 def time_coverage(df: DataFrame) -> dict[str, Any]:
-    """Observed daily coverage inside the [min, max] created_day window."""
-    row = df.agg(
+    """Observed daily coverage distinguishing observed span completeness vs calendar month."""
+    bounds = df.agg(
         F.min("created_day").alias("start"),
         F.max("created_day").alias("end"),
         F.countDistinct("created_day").alias("observed_days"),
+        F.min("created_at").alias("min_ts"),
+        F.max("created_at").alias("max_ts"),
     ).collect()[0]
-    start, end, observed = row["start"], row["end"], int(row["observed_days"])
-    expected = (end - start).days + 1 if start is not None and end is not None else 0
+    start, end = bounds["start"], bounds["end"]
+    observed_days = int(bounds["observed_days"])
+    span_days = (end - start).days + 1 if start and end else 0
+    span_completeness = float(observed_days / span_days) if span_days else 0.0
+
+    daily_rows = (
+        df.filter(F.col("created_day").isNotNull())
+        .groupBy("created_day")
+        .agg(
+            F.count(F.lit(1)).alias("count"),
+            F.min("hour").alias("min_hour"),
+            F.max("hour").alias("max_hour"),
+        )
+        .collect()
+    )
+    # A day is complete if it has records across full diurnal range (min_hour==0 and max_hour==23)
+    complete_days = [r for r in daily_rows if int(r["min_hour"]) == 0 and int(r["max_hour"]) == 23]
+    partial_days = [r for r in daily_rows if not (int(r["min_hour"]) == 0 and int(r["max_hour"]) == 23)]
+
+    complete_counts = [int(r["count"]) for r in complete_days]
+    all_counts = [int(r["count"]) for r in daily_rows]
+
+    target_month_days = 31  # January 2024
+    month_coverage_ratio = float(observed_days / target_month_days)
+    full_day_month_coverage_ratio = float(len(complete_days) / target_month_days)
+
     return {
         "period_start": str(start),
         "period_end": str(end),
-        "expected_days": int(expected),
-        "observed_days": observed,
-        "coverage_ratio": float(observed / expected) if expected else 0.0,
+        "created_min_ts": str(bounds["min_ts"]),
+        "created_max_ts": str(bounds["max_ts"]),
+        "observed_span_days": span_days,
+        "observed_span_completeness": span_completeness,
+        "full_days_count": len(complete_days),
+        "partial_days_count": len(partial_days),
+        "partial_day_dates": [str(r["created_day"]) for r in partial_days],
+        "full_day_mean_volume": float(sum(complete_counts) / len(complete_days)) if complete_days else 0.0,
+        "all_days_mean_volume": float(sum(all_counts) / len(all_counts)) if all_counts else 0.0,
+        "target_calendar_month": "2024-01",
+        "target_month_days": target_month_days,
+        "month_coverage_ratio": round(month_coverage_ratio, 4),
+        "full_day_month_coverage_ratio": round(full_day_month_coverage_ratio, 4),
+        "expected_days": span_days,
+        "observed_days": observed_days,
+        "coverage_ratio": span_completeness,  # retained for backwards compatibility
     }

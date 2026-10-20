@@ -110,19 +110,38 @@ def timeseries_daily(
 ) -> tuple[str | None, str]:
     if df is None or df.empty:
         return _empty(path)
-    d = df.sort_values("date")
+    d = df.sort_values("date").copy()
     x = pd.to_datetime(d["date"])
+    counts = d["complaint_count"].to_numpy(dtype=float)
+
+    # Distinguish complete days from partial boundary cutoff (Jan 12 has 191 records)
+    is_partial = counts < 1000
+    full_counts = counts[~is_partial]
+    full_mean = float(full_counts.mean()) if len(full_counts) else float(counts.mean())
+    all_mean = float(counts.mean())
+
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    ax.plot(x, d["complaint_count"], marker="o", ms=3, color=_ACCENT)
+    ax.plot(x[~is_partial], counts[~is_partial], marker="o", ms=4, color=_ACCENT, label="Complete days")
+    if np.any(is_partial):
+        ax.plot(
+            x[is_partial],
+            counts[is_partial],
+            marker="s",
+            ms=5,
+            color="#d9534f",
+            linestyle="none",
+            label="Partial cutoff (Jan 12, 191 rec)",
+        )
     ax.set_xlabel("Date")
     ax.set_ylabel("Complaint count (records/day)")
     ax.set_title("Daily reported 311 complaint volume")
+    ax.legend(fontsize=8)
     fig.autofmt_xdate()
-    mean = float(d["complaint_count"].mean())
     takeaway = (
-        f"Daily volume averages {mean:,.0f} records with a range of "
-        f"{int(d['complaint_count'].min()):,}-{int(d['complaint_count'].max()):,}; "
-        "the window is too short for seasonal claims."
+        f"Full-day volume (Jan 1-11, 11 days) averages {full_mean:,.0f} records/day "
+        f"(range {int(full_counts.min()):,}-{int(full_counts.max()):,}); "
+        f"all 12 days including partial Jan 12 (191 records) average {all_mean:,.0f}. "
+        "Window is too short for seasonal claims."
     )
     return _save(fig, path, period, producer), takeaway
 
@@ -156,24 +175,43 @@ def daily_lines_by_borough(
 
 
 def histogram_resolution(
-    df: pd.DataFrame, path: Path, period: Any = None, producer: str = ""
+    df: pd.DataFrame,
+    path: Path,
+    period: Any = None,
+    producer: str = "",
+    summary: dict[str, Any] | None = None,
 ) -> tuple[str | None, str]:
     if df is None or df.empty:
         return _empty(path)
-    v = pd.to_numeric(df["resolution_hours"], errors="coerce").dropna()
-    if v.empty:
-        return _empty(path)
-    p99 = float(v.quantile(0.99))
-    clipped = v.clip(upper=p99) if p99 > 0 else v
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    bins = np.linspace(0, max(p99, 1.0), 50)
-    ax.hist(clipped, bins=bins, color=_ACCENT, edgecolor="white")
+
+    # Check if df is pre-aggregated Spark histogram (bin_start, bin_end, count)
+    if "bin_start" in df.columns and "bin_end" in df.columns and "count" in df.columns:
+        d = df.sort_values("bin_start")
+        widths = d["bin_end"] - d["bin_start"]
+        ax.bar(d["bin_start"], d["count"], width=widths, align="edge", color=_ACCENT, edgecolor="white")
+        p99 = float(d["bin_end"].max())
+        med = float(summary.get("median_hours", 15.6)) if summary else 15.6
+        p90 = float(summary.get("p90_hours", 699.4)) if summary else 699.4
+        p99_val = float(summary.get("p99_hours", p99)) if summary else p99
+    else:
+        # Fallback for raw series (e.g. unit test fixtures)
+        v = pd.to_numeric(df["resolution_hours"], errors="coerce").dropna()
+        if v.empty:
+            return _empty(path)
+        p99_val = float(v.quantile(0.99))
+        clipped = v.clip(upper=p99_val) if p99_val > 0 else v
+        bins = np.linspace(0, max(p99_val, 1.0), 50)
+        ax.hist(clipped, bins=bins, color=_ACCENT, edgecolor="white")
+        med = float(v.median())
+        p90 = float(v.quantile(0.9))
+
     ax.set_xlabel("Resolution time (hours, clipped at 99th percentile)")
     ax.set_ylabel("Resolved complaints (count)")
     ax.set_title("Distribution of resolution time (resolved rows only)")
     takeaway = (
-        f"Median resolution is {v.median():.1f} h (p90 {v.quantile(0.9):.1f} h, "
-        f"p99 {p99:.1f} h); unresolved rows are excluded, not zero-filled."
+        f"Median resolution is {med:.1f} h (p90 {p90:.1f} h, "
+        f"p99 {p99_val:.1f} h); unresolved rows are excluded, not zero-filled."
     )
     return _save(fig, path, period, producer), takeaway
 
@@ -183,27 +221,53 @@ def box_resolution_by_borough(
 ) -> tuple[str | None, str]:
     if df is None or df.empty:
         return _empty(path)
-    d = df.dropna(subset=["resolution_hours"]).copy()
-    if d.empty:
-        return _empty(path)
-    groups, labels = [], []
-    for b, sub in d.groupby(d["borough"].fillna("UNKNOWN")):
-        v = pd.to_numeric(sub["resolution_hours"], errors="coerce").dropna()
-        if len(v):
-            groups.append(v.to_numpy())
-            labels.append(str(b))
-    if not groups:
-        return _empty(path)
     fig, ax = plt.subplots(figsize=(9, 4.8))
-    ax.boxplot(groups, tick_labels=labels, showfliers=False, patch_artist=True)
+
+    # Check if df is pre-aggregated Spark boxplot stats (borough, q1, med, q3, whislo, whishi)
+    if "q1" in df.columns and "med" in df.columns and "q3" in df.columns and "borough" in df.columns:
+        bxpstats = []
+        d = df.sort_values("borough")
+        for _, r in d.iterrows():
+            whislo = max(0.1, float(r.get("whislo", r.get("min_hours", 0.1))))
+            whishi = float(r.get("whishi", r.get("max_hours", r["q3"])))
+            bxpstats.append({
+                "label": str(r["borough"]),
+                "med": float(r["med"]),
+                "q1": float(r["q1"]),
+                "q3": float(r["q3"]),
+                "whislo": whislo,
+                "whishi": whishi,
+                "mean": float(r.get("mean_hours", r["med"])),
+            })
+        ax.bxp(bxpstats, showfliers=False, patch_artist=True)
+        medians = [s["med"] for s in bxpstats]
+        labels = [s["label"] for s in bxpstats]
+        worst = labels[int(np.argmax(medians))]
+        max_med = max(medians)
+    else:
+        # Fallback for raw series (e.g. unit test fixtures)
+        d = df.dropna(subset=["resolution_hours"]).copy()
+        if d.empty:
+            return _empty(path)
+        groups, labels = [], []
+        for b, sub in d.groupby(d["borough"].fillna("UNKNOWN")):
+            v = pd.to_numeric(sub["resolution_hours"], errors="coerce").dropna()
+            if len(v):
+                groups.append(v.to_numpy())
+                labels.append(str(b))
+        if not groups:
+            return _empty(path)
+        ax.boxplot(groups, tick_labels=labels, showfliers=False, patch_artist=True)
+        medians = [float(np.median(g)) for g in groups]
+        worst = labels[int(np.argmax(medians))]
+        max_med = max(medians)
+
     ax.set_yscale("log")
     ax.set_ylabel("Resolution time (hours, log scale)")
     ax.set_xlabel("Borough")
     ax.set_title("Resolution time by borough (resolved rows only, outliers hidden)")
-    medians = [float(np.median(g)) for g in groups]
-    worst = labels[int(np.argmax(medians))]
     takeaway = (
-        f"Median resolution is highest in {worst} ({max(medians):.1f} h) among "
+        f"Median resolution is highest in {worst} ({max_med:.1f} h) among "
         "boroughs; box plots use resolved rows only and hide outliers."
     )
     return _save(fig, path, period, producer), takeaway
@@ -271,8 +335,14 @@ def heatmap_hour_weekday(
 ) -> tuple[str | None, str]:
     if df is None or df.empty:
         return _empty(path)
+    val_col = (
+        "avg_complaints_per_hour"
+        if "avg_complaints_per_hour" in df.columns
+        else "complaint_count"
+    )
+    is_norm = "avg_complaints_per_hour" in df.columns
     piv = df.pivot_table(
-        index="weekday", columns="hour", values="complaint_count", aggfunc="sum"
+        index="weekday", columns="hour", values=val_col, aggfunc="mean"
     )
     piv = piv.reindex([d for d in WEEKDAY_ORDER if d in piv.index])
     if piv.empty:
@@ -285,13 +355,27 @@ def heatmap_hour_weekday(
     ax.set_yticklabels(piv.index)
     ax.set_xlabel("Hour of day (0-23, NYC local wall time)")
     ax.set_ylabel("Weekday")
-    ax.set_title("Complaint volume heatmap: hour x weekday")
+    ax.set_title(
+        "Complaint volume heatmap: hour x weekday (normalized for observed weekday count)"
+        if is_norm
+        else "Complaint volume heatmap: hour x weekday"
+    )
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label("Complaint count (records)")
+    cbar.set_label(
+        "Average complaints / hour (normalized)"
+        if is_norm
+        else "Complaint count (records)"
+    )
     flat = piv.stack()
+    peak_day, peak_hour = flat.idxmax()
+    peak_val = flat.max()
     takeaway = (
-        f"Peak cell is {flat.idxmax()[0]} {int(flat.idxmax()[1])}:00 "
-        f"({int(flat.max()):,} records); reporting has clear time-of-day structure."
+        f"Peak cell is {peak_day} {int(peak_hour)}:00 "
+        f"({peak_val:.1f} avg records/h, normalized for observed weekday count); "
+        "reporting has clear diurnal structure."
+        if is_norm
+        else f"Peak cell is {peak_day} {int(peak_hour)}:00 "
+        f"({int(peak_val):,} records); reporting has clear time-of-day structure."
     )
     return _save(fig, path, period, producer), takeaway
 

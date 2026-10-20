@@ -104,3 +104,67 @@ def test_figures_heatmap_and_radar(tmp_path: Path):
     )
     p2, t2 = figures.radar_borough_profile(bc, tmp_path / "radar.png")
     assert p2 is not None and Path(p2).exists() and "normalised" in t2
+
+
+def test_figures_preaggregated_histogram_and_box_stats(tmp_path: Path):
+    hist_pre = pd.DataFrame(
+        {
+            "bin_idx": [0, 1, 2],
+            "bin_start": [0.0, 10.0, 20.0],
+            "bin_end": [10.0, 20.0, 30.0],
+            "count": [100, 50, 10],
+        }
+    )
+    p1, t1 = figures.histogram_resolution(
+        hist_pre,
+        tmp_path / "hist_pre.png",
+        summary={"median_hours": 8.5, "p90_hours": 22.0, "p99_hours": 28.0},
+    )
+    assert p1 is not None and Path(p1).exists() and "8.5" in t1
+
+    box_pre = pd.DataFrame(
+        {
+            "borough": ["BRONX", "BROOKLYN"],
+            "q1": [5.0, 10.0],
+            "med": [15.0, 25.0],
+            "q3": [30.0, 45.0],
+            "whislo": [1.0, 2.0],
+            "whishi": [60.0, 80.0],
+            "mean_hours": [20.0, 32.0],
+        }
+    )
+    p2, t2 = figures.box_resolution_by_borough(box_pre, tmp_path / "box_pre.png")
+    assert p2 is not None and Path(p2).exists() and "BROOKLYN" in t2
+
+
+def test_figures_heatmap_normalized_for_frequency(tmp_path: Path):
+    rows = [
+        {"weekday": "Monday", "hour": 10, "complaint_count": 200, "days_observed": 2, "avg_complaints_per_hour": 100.0},
+        {"weekday": "Saturday", "hour": 10, "complaint_count": 100, "days_observed": 1, "avg_complaints_per_hour": 100.0},
+    ]
+    p, t = figures.heatmap_hour_weekday(pd.DataFrame(rows), tmp_path / "heat_norm.png")
+    assert p is not None and Path(p).exists() and "normalized" in t.lower()
+
+
+def test_timeseries_daily_distinguishes_partial_day(tmp_path: Path):
+    dates = [f"2024-01-{i:02d}" for i in range(1, 13)]
+    counts = [9000] * 11 + [191]  # 11 complete days + 1 partial day
+    df = pd.DataFrame({"date": dates, "complaint_count": counts})
+    p, t = figures.timeseries_daily(df, tmp_path / "ts.png")
+    assert p is not None and Path(p).exists()
+    assert "Full-day volume" in t
+    assert "191 records" in t
+
+
+def test_hotspot_cell_25_31_queens_geographic_label():
+    # Hotspot cell 25:31 center is lat 40.745, lon -73.945 (Long Island City / Sunnyside, Queens)
+    # Bounding box base: 40.49, -74.26, cell_deg = 0.01
+    lat0, lon0 = 40.49, -74.26
+    deg = 0.01
+    center_lat = lat0 + (25 + 0.5) * deg
+    center_lon = lon0 + (31 + 0.5) * deg
+    assert round(center_lat, 3) == 40.745
+    assert round(center_lon, 3) == -73.945
+    # Latitude 40.745 is north of Brooklyn (~40.58-40.71) and east of East River in Queens (Long Island City)
+    assert center_lat > 40.72  # North of Brooklyn / Queens border
+

@@ -14,7 +14,7 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
 ### 1.1. Verified Input Baseline
 - **Input Record Count:** Exactly 100,000 rows.
 - **Unique Identifier Reconciliation:** 100,000 distinct `unique_key` values; exactly 0 duplicate keys.
-- **Temporal Span:** `2024-01-01 00:00:00` to `2024-01-12 01:19:58` (12 calendar days observed out of 12 expected; coverage ratio 1.0).
+- **Temporal Span:** `2024-01-01 00:00:00` to `2024-01-12 01:19:58` (12 calendar days observed in sample span, observed span completeness 1.0; calendar month coverage ratio for January 2024 is 38.71% for all 12 days, or 35.48% for the 11 complete days).
 - **Data Quality Reconciliation:** Exactly 2,715 flagged rows (2.715%) and 97,285 clean rows (97.285%). Breakdown of occurrences:
   - `invalid_coords`: 1,317 rows
   - `invalid_zip`: 1,094 rows
@@ -22,7 +22,7 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
   - `missing_borough`: 80 rows
   - `negative_duration`: 19 rows
   - *Pairwise flag overlap:* 826 rows carry 2+ flags, dominated by `invalid_coords & invalid_zip` (577 rows) and `unresolved & invalid_zip` (216 rows).
-- **Critical Sampling Limitation:** The available dataset contains the first 100,000 records of January 2024 ordered by `unique_key`. Because of the Socrata pagination order, this sample spans only the first 12 days of January. **No multi-month seasonality, annual cycles, or long-term trend can be inferred from this dataset.**
+- **Critical Sampling Limitation:** The available dataset contains the first 100,000 records of January 2024 ordered by `unique_key`. Because of the Socrata pagination order, this sample spans only the first 12 days of January (38.71% of January), with January 12 being a partial day (191 records, 1 hour 19 minutes). Full-day daily demand across the 11 complete days averages 9,074 complaints/day. **No multi-month seasonality, annual cycles, or long-term trend can be inferred from this dataset.**
 
 ---
 
@@ -51,13 +51,14 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
 
 ### 2.2. Temporal Patterns & Peak Demand
 - **Daily Volume (`complaints_daily`):**
-  - Daily mean volume is 8,333 complaints/day, ranging from 191 (January 12, partial day cutoff) to 11,006 complaints (peak day, Wednesday January 10).
+  - Full-day demand across the 11 complete days (Jan 1–11) averages **9,074 complaints/day**, ranging from 6,703 (Sunday Jan 7) to 11,006 (Wednesday Jan 10).
+  - When including the truncated boundary day (January 12, with only 191 records spanning 1.33 hours before API cutoff), the overall 12-day arithmetic average is **8,333 complaints/day**.
   - Weekend volume drops noticeably (e.g., Saturday Jan 6: 7,790; Sunday Jan 7: 6,703 vs ~9,500–11,000 on weekdays).
 - **Diurnal and Day-of-Week Structure (`hour_weekday`):**
-  - Longest-format 168-hour temporal aggregation demonstrates marked diurnal periodicity.
+  - Longest-format 168-hour temporal aggregation is normalized by the number of observed calendar dates for each (weekday, hour) pair (e.g., 2 Wednesdays vs 1 Saturday/Sunday in the 12-day window, and partial cutoff on Friday Jan 12).
   - Reporting reaches its minimum between 03:00 and 05:00 AM (< 150 complaints/hour).
   - Demand surges sharply starting at 07:00 AM, plateauing between 10:00 AM and 15:00 PM.
-  - The single highest demand hour in the dataset is **Wednesday at 11:00 AM** with 1,443 logged complaints.
+  - The single highest normalized hourly demand occurs on **Wednesday at 11:00 AM** with **721.5 average complaints/hour** (1,443 total across the two observed Wednesdays). Normalization prevents raw weekday sums from being artificially doubled relative to single-observation weekend days.
 - **Written Inference:** Municipal shift scheduling can be optimized around an 08:00–16:00 peak staffing window, with reduced night staffing.
 
 ### 2.3. Resolution Duration Distribution
@@ -103,7 +104,7 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
 - **Hotspot Findings:**
   - Across the entire city, 873 distinct grid cells contain at least one complaint.
   - Applying a threshold of $\ge 50$ complaints identifies 462 hotspot cells (`spatial_hotspots`).
-  - The densest cell (`spatial_id: 25:31`, located in Crown Heights / Bedford-Stuyvesant, Brooklyn, center $40.745^\circ\text{N}, -73.945^\circ\text{W}$) recorded **2,842 complaints**, yielding a density of **3,046 complaints/$\text{km}^2$**.
+  - The densest cell (`spatial_id: 25:31`, located in Long Island City / Sunnyside, Queens, center $40.745^\circ\text{N}, -73.945^\circ\text{W}$; dominant borough `QUEENS`) recorded **2,842 complaints**, yielding a density of **3,046 complaints/$\text{km}^2$**.
 
 ---
 
@@ -177,19 +178,19 @@ All figures are rendered headlessly via `matplotlib` (PNG) and `plotly` (HTML) w
 
 1. **`borough_bar.png`:** Horizontal bar chart. *Takeaway:* Brooklyn has the most reported complaints (32,470 of 100,000); counts are reporting frequency, not infrastructure quality.
 2. **`category_bar.png`:** Horizontal bar chart of top 15 categories. *Takeaway:* 'Illegal Parking' is the most reported category (15,450 records) in this window.
-3. **`daily_timeseries.png`:** Daily volume trend over 12 days. *Takeaway:* Daily volume averages 8,333 records with a range of 191-11,006; the window is too short for seasonal claims.
+3. **`daily_timeseries.png`:** Daily volume trend over 12 days. *Takeaway:* Full-day volume (Jan 1-11, 11 days) averages 9,074 records/day (range 6,703-11,006); all 12 days including partial Jan 12 (191 records) average 8,333. Window is too short for seasonal claims.
 4. **`daily_by_borough.png`:** Multi-line daily volume by borough. *Takeaway:* Brooklyn contributes the largest share of daily volume (32.5% of records in window).
-5. **`hour_weekday_heatmap.png`:** $24 \times 7$ grid heatmap. *Takeaway:* Peak cell is Wednesday 11:00 (1,443 records); reporting has clear time-of-day structure.
+5. **`hour_weekday_heatmap.png`:** $24 \times 7$ grid heatmap. *Takeaway:* Peak cell is Wednesday 11:00 (721.5 avg records/h, normalized for observed weekday count); reporting has clear diurnal structure.
 6. **`daily_kde.png`:** Kernel Density Estimation. *Takeaway:* Daily volume is centred near 9,524 records/day; KDE is a smoothing of the observed days only.
 7. **`daily_violin.png`:** Violin plots of daily borough volume. *Takeaway:* Violins show the spread of daily volume within each borough; wide spreads mean unstable daily demand, not higher counts.
-8. **`resolution_hist.png`:** Distribution of resolution hours up to $P_{99}$. *Takeaway:* Median resolution is 15.6 h (p90 699.4 h, p99 6973.5 h); unresolved rows are excluded, not zero-filled.
+8. **`resolution_hist.png`:** Distribution of resolution hours up to $P_{99}$. *Takeaway:* Median resolution is 15.6 h (p90 698.3 h, p99 6913.0 h); unresolved rows are excluded, not zero-filled.
 9. **`resolution_box.png`:** Boxplots across boroughs (outliers omitted for readability). *Takeaway:* Median resolution is highest in UNKNOWN (191.7 h) among boroughs; box plots use resolved rows only and hide outliers.
 10. **`borough_radar.png`:** Radar chart comparing normalized complaint proportions across boroughs. *Takeaway:* Radar compares only normalised category shares per borough; a longer spoke means a larger share of that borough's own volume, not more records.
 11. **`kmeans_silhouette.png`:** Silhouette score curve. *Takeaway:* Best silhouette 0.599 at k=2; silhouette alone does not prove cluster meaning.
 12. **`kmeans_clusters.png`:** Spatial scatter plot of 873 grid cells colored by cluster. *Takeaway:* 2 cluster centres shown over valid coordinates; clusters are descriptive reporting-intensity groups, not risk labels.
 13. **`dbscan_clusters.png`:** Point-level map of 103 micro-clusters and unassigned noise points. *Takeaway:* DBSCAN found 103 dense clusters with 59.9% noise on a bounded sample; it is single-node, not distributed, and eps is in metres.
 14. **`dbscan_sensitivity.png`:** Sensitivity curve plotting cluster count and noise share against search radius $\epsilon \in [100\text{m}, 1000\text{m}]$. *Takeaway:* At eps=100 m noise is 92.8% with 30 clusters; larger eps merges points and reduces noise, showing that the density result is parameter-dependent.
-15. **`hotspot_map.html`:** Interactive Plotly map with hover metrics (count, density per $\text{km}^2$, dominant category) for all 462 hotspot cells. *Takeaway:* 462 grid cells with >= threshold records; darker/larger = more reported complaints (counts, not population-adjusted rates).
+15. **`hotspot_map.html`:** Interactive Plotly map with hover metrics (count, density per $\text{km}^2$, dominant category) for all 462 hotspot cells. *Takeaway:* 462 grid cells with >= threshold records; top cell 25:31 located in Long Island City / Sunnyside, Queens (40.745, -73.945).
 
 ---
 
