@@ -106,21 +106,40 @@ def select_k(
 
 
 def _dominant_by_cluster(
-    joined: Any, value_col: str, out_name: str
+    joined: Any,
+    value_col: str,
+    out_name: str,
+    weight_col: str | None = None,
 ) -> dict[int, Any]:
-    from pyspark.sql import functions as F
+    """Deterministically pick the dominant category per cluster using a Window.
 
-    counts = (
-        joined.select("cluster", value_col)
-        .fillna({value_col: "UNKNOWN"})
-        .groupBy("cluster", value_col)
-        .count()
-        .withColumnRenamed("count", "_n")
+    If ``weight_col`` is specified (e.g. 'complaint_count'), sums weights
+    (complaint volume basis); otherwise counts constituent grid cells (cell basis).
+    Orders by aggregated frequency descending, with ascending value_col tie-breaking,
+    and filters for row_number == 1.
+    """
+    from pyspark.sql import functions as F
+    from pyspark.sql.window import Window
+
+    select_cols = ["cluster", value_col] + ([weight_col] if weight_col else [])
+    base = joined.select(*select_cols).fillna({value_col: "UNKNOWN"})
+    if weight_col:
+        counts = base.groupBy("cluster", value_col).agg(
+            F.sum(weight_col).alias("_n")
+        )
+    else:
+        counts = (
+            base.groupBy("cluster", value_col)
+            .count()
+            .withColumnRenamed("count", "_n")
+        )
+    win = Window.partitionBy("cluster").orderBy(
+        F.col("_n").desc(), F.col(value_col).asc()
     )
     rows = (
-        counts.orderBy(F.col("_n").desc(), F.col("cluster").asc(), F.col(value_col).asc())
-        .groupBy("cluster")
-        .agg(F.first(value_col).alias(out_name))
+        counts.withColumn("_rn", F.row_number().over(win))
+        .filter(F.col("_rn") == 1)
+        .select(F.col("cluster"), F.col(value_col).alias(out_name))
         .collect()
     )
     return {int(r["cluster"]): r[out_name] for r in rows}
@@ -129,7 +148,7 @@ def _dominant_by_cluster(
 def cluster_summary(
     predictions: Any, cell_df: Any, lat0: float, lon0: float
 ) -> Any:
-    """Per-cluster description: size, volume, centre, dominant labels."""
+    """Per-cluster description: size, volume, centre, dominant labels, and weighted resolution."""
     from pyspark.sql import functions as F
 
     keyed = predictions.select("spatial_id", "cluster")
@@ -138,18 +157,41 @@ def cluster_summary(
         "x_m",
         "y_m",
         "complaint_count",
-        "mean_resolution_hours",
         "dominant_borough",
         "dominant_complaint",
     ]
-    joined = cell_df.select(*cols).join(keyed, on="spatial_id", how="inner")
+    extra_cols = [
+        c
+        for c in ["mean_resolution_hours", "total_resolution_hours", "resolved_count"]
+        if c in cell_df.columns
+    ]
+    joined = cell_df.select(*(cols + extra_cols)).join(keyed, on="spatial_id", how="inner")
+
+    has_exact = "total_resolution_hours" in joined.columns and "resolved_count" in joined.columns
+    has_mean = "mean_resolution_hours" in joined.columns
+
+    if has_exact:
+        res_expr = F.round(
+            F.sum("total_resolution_hours")
+            / F.when(F.sum("resolved_count") > 0, F.sum("resolved_count")).otherwise(F.lit(1.0)),
+            3,
+        ).alias("mean_resolution_hours")
+    elif has_mean:
+        res_expr = F.round(
+            F.sum(F.col("mean_resolution_hours") * F.col("complaint_count"))
+            / F.when(F.sum("complaint_count") > 0, F.sum("complaint_count")).otherwise(F.lit(1.0)),
+            3,
+        ).alias("mean_resolution_hours")
+    else:
+        res_expr = F.lit(None).cast("double").alias("mean_resolution_hours")
+
     agg = joined.groupBy("cluster").agg(
         F.count(F.lit(1)).alias("cells"),
         F.sum("complaint_count").alias("complaints"),
         F.round(F.avg("x_m"), 2).alias("center_x_m"),
         F.round(F.avg("y_m"), 2).alias("center_y_m"),
         F.round(F.avg("complaint_count"), 3).alias("mean_complaints_per_cell"),
-        F.round(F.avg("mean_resolution_hours"), 3).alias("mean_resolution_hours"),
+        res_expr,
     )
     borough = _dominant_by_cluster(joined, "dominant_borough", "dominant_borough")
     complaint = _dominant_by_cluster(joined, "dominant_complaint", "dominant_complaint")

@@ -87,7 +87,17 @@ def main(argv: list[str] | None = None) -> int:
             print("[member1] BLOCKER: cleaned table is empty", flush=True)
             return 3
 
-        coverage = spark_eda.time_coverage(df)
+        manifest_path = resolve_path(
+            ROOT, cfg.get("out_manifest", "data/manifests/manifest_sample.json")
+        )
+        ingestion_meta = None
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    ingestion_meta = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                ingestion_meta = None
+        coverage = spark_eda.time_coverage(df, ingestion_meta=ingestion_meta)
         geo_quality = geospatial.geo_quality_summary(df)
         period = {
             "period_start": coverage["period_start"],
@@ -120,9 +130,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         table_meta["spatial_hotspots"] = _write_table(hot, tables_dir / "spatial_hotspots")
         table_meta["zip_hotspots"] = _write_table(zips, tables_dir / "zip_hotspots")
-        table_meta["spatial_grid_cells"] = _write_table(
-            cells.drop("mean_resolution_hours"), tables_dir / "spatial_grid_cells"
-        )
         hot_pd = spark_eda.bounded_pandas(hot, cap)
         zips_pd = spark_eda.bounded_pandas(zips, cap)
 
@@ -157,9 +164,22 @@ def main(argv: list[str] | None = None) -> int:
                 "n_cells": int(n_cells),
                 "k_metrics": k_metrics,
             }
+            cells_assigned = cells.join(
+                preds.select("spatial_id", "cluster"), on="spatial_id", how="left"
+            )
         else:
             cluster_pd = None
             chosen = {"variant": None, "n_cells": int(n_cells), "k_metrics": []}
+            cells_assigned = cells
+
+        table_meta["spatial_grid_cells"] = _write_table(
+            cells_assigned.drop(
+                "mean_resolution_hours", "total_resolution_hours", "resolved_count"
+            ),
+            tables_dir / "spatial_grid_cells",
+        )
+        cells_pd = spark_eda.bounded_pandas(cells_assigned, cap)
+
         if cluster_pd is not None and len(cluster_pd):
             cs_sdf = spark.createDataFrame(cluster_pd)
             table_meta["cluster_summary"] = _write_table(
@@ -188,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             print("[member1] figures", flush=True)
             _fig("borough_bar", figures.bar_borough(pand["complaints_by_borough"], figures_dir / "borough_bar.png", period, producer), notes, meta)
             _fig("category_bar", figures.bar_categories(pand["complaints_by_category"], figures_dir / "category_bar.png", period, producer, m1["top_categories"]), notes, meta)
-            _fig("daily_timeseries", figures.timeseries_daily(pand["complaints_daily"], figures_dir / "daily_timeseries.png", period, producer), notes, meta)
+            _fig("daily_timeseries", figures.timeseries_daily(pand["complaints_daily"], figures_dir / "daily_timeseries.png", period, producer, coverage_meta=coverage), notes, meta)
             _fig("daily_by_borough", figures.daily_lines_by_borough(pand["complaints_daily_borough"], figures_dir / "daily_by_borough.png", period, producer), notes, meta)
             _fig("hour_weekday_heatmap", figures.heatmap_hour_weekday(pand["hour_weekday"], figures_dir / "hour_weekday_heatmap.png", period, producer), notes, meta)
             _fig("daily_kde", figures.kde_daily_volume(pand["complaints_daily"], figures_dir / "daily_kde.png", period, producer), notes, meta)
@@ -236,7 +256,18 @@ def main(argv: list[str] | None = None) -> int:
                     sel_pd = spark.createDataFrame(sel).toPandas()
                     _fig("kmeans_silhouette", figures.silhouette_curve(sel_pd, figures_dir / "kmeans_silhouette.png", period, producer), notes, meta)
             if cluster_pd is not None:
-                _fig("kmeans_clusters", figures.cluster_scatter(cluster_pd, figures_dir / "kmeans_clusters.png", period, producer), notes, meta)
+                _fig(
+                    "kmeans_clusters",
+                    figures.cluster_scatter(
+                        cells_pd,
+                        figures_dir / "kmeans_clusters.png",
+                        period,
+                        producer,
+                        centers_df=cluster_pd,
+                    ),
+                    notes,
+                    meta,
+                )
             if labelled is not None:
                 _fig("dbscan_clusters", figures.dbscan_scatter(labelled, figures_dir / "dbscan_clusters.png", period, producer), notes, meta)
             if dbscan_sensitivity:

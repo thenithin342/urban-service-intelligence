@@ -204,11 +204,11 @@ For the selected model ($k=2$, `log_count_scaled`):
 
 | Cluster | Cells | Total Complaints | Centroid Lat | Centroid Lon | Centroid $x_m$ (m) | Centroid $y_m$ (m) | Mean Complaints / Cell | Mean Resolution (h) | Dominant Borough | Dominant Category |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |
-| **0** | **664** | **93,956** | $40.73440^\circ\text{N}$ | $-73.87360^\circ\text{W}$ | 6,447.87 | 3,803.48 | 141.50 | 359.00 h | QUEENS | Illegal Parking |
-| **1** | **209** | **4,727** | $40.58754^\circ\text{N}$ | $-74.09725^\circ\text{W}$ | -12,427.14 | -12,435.61 | 22.62 | 606.11 h | STATEN ISLAND | Illegal Parking |
+| **0** | **664** | **93,956** | $40.73440^\circ\text{N}$ | $-73.87360^\circ\text{W}$ | 6,447.87 | 3,803.48 | 141.50 | **335.02 h** | QUEENS | Illegal Parking |
+| **1** | **209** | **4,727** | $40.58754^\circ\text{N}$ | $-74.09725^\circ\text{W}$ | -12,427.14 | -12,435.61 | 22.62 | **463.99 h** | STATEN ISLAND | Illegal Parking |
 | **Total** | **873** | **98,683** | — | — | — | — | — | — | — | — |
 
-*Reconciliation Check:* $664 + 209 = 873$ cells (100%). $93,956 + 4,727 = 98,683$ complaints (exactly equal to `valid_coords_rows`).
+*Reconciliation & Weighting Note:* $664 + 209 = 873$ cells (100%). $93,956 + 4,727 = 98,683$ complaints (exactly equal to `valid_coords_rows`). Resolved-record weighting replaces the unweighted arithmetic mean of cell means ($359.00\text{ h} \to 335.02\text{ h}$ for C0; $606.11\text{ h} \to 463.99\text{ h}$ for C1). Dominant labels in `cluster_summary` represent grid-cell plurality (Queens has 298 cells in C0 vs Brooklyn's 166; Staten Island has 157 in C1). On total complaint volume, Brooklyn leads C0 (30,928 complaints) and Illegal Parking leads both. Cluster assignments are also added directly to `spatial_grid_cells.cluster` for Member 3 consumption.
 
 ### Bounded Scikit-Learn DBSCAN Audit
 - Point sample: 20,000 rows (deterministic CRC32 ordering over valid coordinates).
@@ -317,4 +317,57 @@ Following the initial audit review, five additional methodological improvements 
   - `month_coverage_ratio`: **0.3871** (38.71% of January 2024)
   - `full_day_month_coverage_ratio`: **0.3548** (35.48% of January 2024)
   - Explicit note documenting that this is an incomplete 12-day sample of January 2024. Regression test `test_time_coverage_expanded_metrics` added.
+
+---
+
+## 11. Final Targeted Code-Quality & Correctness Review (5 Issues Resolved)
+
+Following independent source-code inspection of commit `602db4c`, five targeted methodological and implementation issues were identified and resolved:
+
+### 11.1. Deterministic Window Ranking Replacing `first()` in `_dominant`
+- **Issue:** `src/analytics/geospatial.py::_dominant` and `src/analytics/clustering.py::_dominant_by_cluster` used `orderBy(...).groupBy(...).agg(F.first(...))`. In distributed Spark, `groupBy().agg(first(...))` without an intra-partition total order can pick different winners across partition boundaries or under shuffled execution.
+- **Root Cause:** Spark's `first()` aggregate operator does not guarantee preservation of preceding global sort orders across shuffle partitions.
+- **Resolution:** Replaced with deterministic Window functions:
+  ```python
+  win = Window.partitionBy(group_col).orderBy(F.col("_n").desc(), F.col(val_col).asc())
+  counts.withColumn("_rn", F.row_number().over(win)).filter(F.col("_rn") == 1)
+  ```
+  Ties are strictly broken alphabetically by ascending category value.
+- **Verification:** Added `test_dominant_deterministic_with_shuffled_partitions` in `tests/integration/test_member1_spark.py`, validating deterministic results across 1, 3, 4, and 7 shuffled partitions with deliberate frequency ties.
+
+### 11.2. Dynamic Daily Timeseries Eliminating Hardcoded Rules
+- **Issue:** `src/analytics/figures.py::timeseries_daily` contained a hardcoded rule `is_partial = counts < 1000` and hardcoded strings referring to "Jan 12, 191 rec" and "Jan 1-11, 11 days".
+- **Root Cause:** Prototyped heuristic for boundary cutoff detection hardcoded sample-specific assumptions.
+- **Resolution:** Removed the `< 1000` threshold and hardcoded strings. `timeseries_daily` now accepts an explicit `coverage_meta` dictionary (derived from `time_coverage`). If partial dates are identified by diurnal span analysis (`partial_day_dates`), they are highlighted dynamically; otherwise, all days are treated homogeneously.
+- **Verification:** Updated `test_timeseries_daily_distinguishes_partial_day` in `tests/unit/test_member1_analytics.py` to test both metadata-driven partial day annotation and metadata-free homogeneous plotting.
+
+### 11.3. Dynamic Calendar Span in `time_coverage` Supporting Arbitrary Month/Year Inputs
+- **Issue:** `src/analytics/spark_eda.py::time_coverage` hardcoded `target_month_days = 31` and `"target_calendar_month": "2024-01"`, which would fail on February, leap years, multi-month, or multi-year inputs.
+- **Root Cause:** Fixed constant assumptions from initial January 2024 scoping.
+- **Resolution:** Implemented `_month_span_info(start_date, end_date)` utilizing Python's `calendar.monthrange(year, month)` to dynamically calculate the exact calendar days for any single month, leap year (e.g. February 2024 = 29 days), or multi-month span (e.g. Jan 15 to Feb 15 = 60 days). Supports optional ingestion manifest metadata.
+- **Verification:** Added `test_time_coverage_dynamic_arbitrary_span` in `tests/integration/test_member1_spark.py`, confirming dynamic calendar calculations for leap-year February and multi-month spans with zero hardcoding.
+
+### 11.4. Quantile Transparency & Reconciliation (Exact vs. Spark GK-Sketches)
+- **Issue:** Reports and docstrings claimed "exact five-number summary" while using Spark's `percentile_approx`, and cited slightly different $P_{90}$/$P_{99}$ values ($699.36\text{ h} / 6,973.47\text{ h}$ from in-memory Pandas vs $698.26\text{ h} / 6,912.99\text{ h}$ from Spark).
+- **Root Cause:** Spark SQL's distributed `percentile_approx` implements the Greenwald-Khanna (GK) streaming sketch algorithm. At default `accuracy=10,000`, the GK sketch produces bounded approximations ($\pm 0.01\%$) rather than exact sorted interpolation.
+- **Resolution:**
+  - Upgraded Spark quantile calculation in `resolution_overall_stats` to `accuracy=50,000`: Median matches exact ($15.6103\text{ h}$), $P_{90} = 699.28\text{ h}$ (vs $699.36\text{ h}$, $0.01\%$ diff), and $P_{99} = 6,973.40\text{ h}$ (vs $6,973.47\text{ h}$, $0.001\%$ diff).
+  - Explicitly documented both exact sorted order and GK-sketch estimates across all reports and tables.
+  - Corrected all docstrings from "exact five-number summary" to "approximate five-number summary via Spark percentile_approx (GK-sketch)".
+- **Verification:** Reconciled in `reports/member1/phase3_findings.md` Table 2.3 and validated in `test_spark_resolution_histogram_and_box_stats`.
+
+### 11.5. Weighted Cluster Mean Resolution, Dominant Label Basis & Full Grid Visualization
+- **Issue:**
+  1. `cluster_summary` computed `mean_resolution_hours` using an unweighted arithmetic mean of grid-cell averages (`avg(mean_resolution_hours)`), giving equal weight to cells with 1 complaint and cells with 2,842 complaints ($359.00\text{ h}$ for C0 and $606.11\text{ h}$ for C1).
+  2. Dominant borough and complaint labels were ambiguous between grid-cell plurality and total complaint volume.
+  3. `cluster_scatter` only plotted the two cluster centroids rather than all constituent grid cells.
+  4. Cluster assignments were not exposed to Member 3.
+- **Resolution:**
+  - `cell_features` now computes `resolved_count` and `total_resolution_hours` per cell. `cluster_summary` computes the exact resolved-record weighted mean:
+    $$\text{mean\_res} = \frac{\sum \text{total\_resolution\_hours}}{\sum \text{resolved\_count}}$$
+    Yielding **335.02 h** for Core Cluster 0 (vs 359.00 h unweighted) and **463.99 h** for Periphery Cluster 1 (vs 606.11 h unweighted).
+  - Clarified dominant label definitions: `cluster_summary` reports *grid-cell plurality* (Queens 298 cells in C0; Staten Island 157 cells in C1). On a *complaint volume* basis, Brooklyn leads C0 with 30,928 complaints; Illegal Parking is dominant in both clusters under both definitions.
+  - Updated `spatial_grid_cells` table to include the `cluster` assignment column (`spatial_grid_cells.cluster`), providing an immediate interface for Member 3's Streamlit dashboard and modeling.
+  - Updated `figures.py::cluster_scatter` to render all 873 spatial grid cells colored by cluster assignment with bubble size proportional to complaint volume, with large red centroid markers overlaid.
+- **Verification:** Validated in `test_kmeans_and_summary`, `test_cluster_scatter_with_grid_cells_and_centers`, and verified via end-to-end artifact generation.
 

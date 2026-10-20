@@ -299,5 +299,69 @@ def test_time_coverage_expanded_metrics(spark, fixture_df):
     assert "month_coverage_ratio" in cov
     assert "full_days_count" in cov
     assert "partial_days_count" in cov
+    assert cov["target_month_days"] == 31  # January 2024 dynamically
+    assert cov["target_calendar_month"] == "2024-01"
     assert cov["month_coverage_ratio"] == round(5 / 31, 4)
+
+
+def test_time_coverage_dynamic_arbitrary_span(spark):
+    # Test arbitrary month: February 2024 (leap year = 29 days)
+    feb_rows = [
+        (date(2024, 2, 1), datetime(2024, 2, 1, 0, 0, 0), 0),
+        (date(2024, 2, 10), datetime(2024, 2, 10, 23, 0, 0), 23),
+    ]
+    feb_df = spark.createDataFrame(feb_rows, ["created_day", "created_at", "hour"])
+    feb_cov = spark_eda.time_coverage(feb_df)
+    assert feb_cov["target_month_days"] == 29
+    assert feb_cov["target_calendar_month"] == "2024-02"
+
+    # Test multi-month span: 2024-01-15 to 2024-02-15 (31 + 29 = 60 days)
+    span_rows = [
+        (date(2024, 1, 15), datetime(2024, 1, 15, 0, 0, 0), 0),
+        (date(2024, 2, 15), datetime(2024, 2, 15, 23, 0, 0), 23),
+    ]
+    span_df = spark.createDataFrame(span_rows, ["created_day", "created_at", "hour"])
+    span_cov = spark_eda.time_coverage(span_df)
+    assert span_cov["target_month_days"] == 60
+    assert span_cov["target_calendar_month"] == "2024-01, 2024-02"
+
+
+def test_dominant_deterministic_with_shuffled_partitions(spark):
+    # Create deliberate ties in counts:
+    # cell 1: 'Noise' (2 records), 'Heat' (2 records) -> 'Heat' < 'Noise' alphabetically, so 'Heat' must win
+    # cell 2: 'Water' (3 records), 'Illegal Parking' (1 record) -> 'Water' wins on count
+    raw = [
+        ("cell_1", "Noise"),
+        ("cell_1", "Noise"),
+        ("cell_1", "Heat"),
+        ("cell_1", "Heat"),
+        ("cell_2", "Water"),
+        ("cell_2", "Water"),
+        ("cell_2", "Water"),
+        ("cell_2", "Illegal Parking"),
+    ]
+    df = spark.createDataFrame(raw, ["spatial_id", "complaint_type"])
+
+    # Test with multiple shuffle partition counts and explicit random repartitions
+    for partitions in [1, 3, 7]:
+        spark.conf.set("spark.sql.shuffle.partitions", str(partitions))
+        shuffled = df.repartition(partitions)
+        dom = geospatial._dominant(shuffled, "spatial_id", "complaint_type", "dominant_complaint")
+        res = {r["spatial_id"]: r["dominant_complaint"] for r in dom.collect()}
+        assert res["cell_1"] == "Heat", f"Alphabetical tie-break failed on {partitions} partitions"
+        assert res["cell_2"] == "Water", f"Count priority failed on {partitions} partitions"
+
+    # Test _dominant_by_cluster with shuffled partitions and volume weighting
+    cluster_raw = [
+        (0, "QUEENS", 10),
+        (0, "BROOKLYN", 10),  # tie in cell count, BROOKLYN < QUEENS
+        (1, "STATEN ISLAND", 5),
+    ]
+    c_df = spark.createDataFrame(cluster_raw, ["cluster", "borough", "complaint_count"])
+    for partitions in [1, 4, 7]:
+        spark.conf.set("spark.sql.shuffle.partitions", str(partitions))
+        c_shuffled = c_df.repartition(partitions)
+        dom_c = clustering._dominant_by_cluster(c_shuffled, "borough", "dominant_borough")
+        assert dom_c[0] == "BROOKLYN"
+        assert dom_c[1] == "STATEN ISLAND"
 

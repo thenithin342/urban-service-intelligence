@@ -186,7 +186,7 @@ Metadata and metrics are emitted as machine-readable JSON:
 
 ### 3.14. `spatial_grid_cells`
 - **Path:** `artifacts/member1/analytics/tables/spatial_grid_cells`
-- **Grain:** One row per active spatial grid cell (used as clustering feature input).
+- **Grain:** One row per active spatial grid cell (used as clustering feature input and cluster assignment output for Member 3).
 - **Row count:** 873
 - **Schema:**
   | Column Name | Data Type | Nullable | Description |
@@ -199,6 +199,7 @@ Metadata and metrics are emitted as machine-readable JSON:
   | `dominant_complaint` | `string` | Yes | Most frequent complaint category |
   | `x_m` | `double` | No | Tangent plane projected easting (metres) |
   | `y_m` | `double` | No | Tangent plane projected northing (metres) |
+  | `cluster` | `bigint` | Yes | KMeans primary cluster assignment (`0`=Core, `1`=Periphery) |
 
 ### 3.15. `kmeans_ablation`
 - **Path:** `artifacts/member1/analytics/tables/kmeans_ablation`
@@ -228,11 +229,11 @@ Metadata and metrics are emitted as machine-readable JSON:
   | `center_x_m` | `double` | No | Cluster centre projected easting (m) |
   | `center_y_m` | `double` | No | Cluster centre projected northing (m) |
   | `mean_complaints_per_cell` | `double` | No | Average complaints per constituent cell |
-  | `mean_resolution_hours` | `double` | No | Mean resolution time of complaints in cluster |
+  | `mean_resolution_hours` | `double` | No | Exact resolved-record weighted mean resolution duration |
   | `center_lat` | `double` | No | Cluster centre latitude |
   | `center_lon` | `double` | No | Cluster centre longitude |
-  | `dominant_borough` | `string` | Yes | Dominant borough across cluster cells |
-  | `dominant_complaint` | `string` | Yes | Dominant complaint category across cluster cells |
+  | `dominant_borough` | `string` | Yes | Dominant borough across constituent cells (grid cell plurality) |
+  | `dominant_complaint` | `string` | Yes | Dominant complaint category across constituent cells (grid cell plurality) |
 
 ---
 

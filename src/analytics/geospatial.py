@@ -24,6 +24,7 @@ from typing import Any
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
 LAT_MIN, LAT_MAX = 40.49, 40.92
 LON_MIN, LON_MAX = -74.26, -73.70
@@ -149,16 +150,24 @@ def project_local(lat: Any, lon: Any, lat0: float, lon0: float) -> tuple[Any, An
 def _dominant(
     df: DataFrame, cell_col: str, value_col: str, out_name: str
 ) -> DataFrame:
+    """Deterministically select dominant category per group using a Window.
+
+    Partitions by cell_col, orders by frequency descending with ascending
+    value_col tie-breaking, and filters for row_number == 1.
+    """
     counts = (
         df.groupBy(cell_col, value_col)
         .count()
         .withColumnRenamed("count", "_n")
         .fillna({value_col: "UNKNOWN"})
     )
+    win = Window.partitionBy(cell_col).orderBy(
+        F.col("_n").desc(), F.col(value_col).asc()
+    )
     return (
-        counts.orderBy(F.col("_n").desc(), F.col(cell_col).asc(), F.col(value_col).asc())
-        .groupBy(cell_col)
-        .agg(F.first(value_col).alias(out_name))
+        counts.withColumn("_rn", F.row_number().over(win))
+        .filter(F.col("_rn") == 1)
+        .select(F.col(cell_col), F.col(value_col).alias(out_name))
     )
 
 
@@ -172,7 +181,8 @@ def cell_features(
     """Aggregated grid-cell feature table used for clustering.
 
     Columns: spatial_id, center_lat, center_lon, x_m, y_m, complaint_count,
-    mean_resolution_hours, dominant_borough, dominant_complaint.
+    mean_resolution_hours, resolved_count, total_resolution_hours,
+    dominant_borough, dominant_complaint.
     """
     cols = _cell_columns(cell_deg)
     valid = filter_valid_coords(df)
@@ -189,6 +199,8 @@ def cell_features(
         .agg(
             F.count(F.lit(1)).alias("complaint_count"),
             F.mean("resolution_hours").alias("mean_resolution_hours"),
+            F.count("resolution_hours").alias("resolved_count"),
+            F.sum("resolution_hours").alias("total_resolution_hours"),
         )
         .filter(F.col("complaint_count") >= min_count)
     )

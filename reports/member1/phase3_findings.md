@@ -74,6 +74,15 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
   - **90th Percentile ($P_{90}$):** 699.3587 hours (~29.14 days).
   - **99th Percentile ($P_{99}$):** 6,973.4673 hours (~290.56 days).
   - **Maximum Observed Duration:** 23,639.3667 hours (~984.97 days, reflecting multi-year legacy reconciliation).
+  - **Exact Rank vs. Distributed Spark GK-Sketch Quantile Reconciliation:**
+
+    | Metric | Exact Sorted Rank (NumPy/Pandas) | Spark `percentile_approx` (acc=50,000) | Spark `percentile_approx` (acc=10,000) | Relative Variance (acc=50,000 vs Exact) |
+    | :--- | :---: | :---: | :---: | :---: |
+    | **Median ($P_{50}$)** | 15.6103 h | 15.6103 h | 15.6064 h | **0.00%** (exact match) |
+    | **90th % ($P_{90}$)** | 699.3587 h | 699.2756 h | 698.2572 h | **0.01%** (< 0.1 hour diff) |
+    | **99th % ($P_{99}$)** | 6,973.4673 h | 6,973.4017 h | 6,912.9933 h | **0.001%** (< 0.1 hour diff) |
+
+    *Methodological Note:* Spark SQL's distributed `percentile_approx` utilizes the Greenwald-Khanna (GK) streaming sketch algorithm. Unlike driver-side in-memory sorting which requires collecting all 79k+ records to driver RAM, GK-sketches execute in a single distributed pass across executor partitions. At `accuracy=50,000`, the distributed sketch agrees with exact sorted interpolation to within < 0.01%. Claims of "exact five-number summary" have been corrected to "approximate five-number summary via Spark percentile_approx".
 - **By-Borough Resolution Differences (`resolution_by_borough`):**
   - `QUEENS` (22,536 resolved): Median 6.87 h, Mean 315.08 h, $P_{90}$ 406.22 h, $P_{99}$ 6,973.40 h (fastest median resolution).
   - `BROOKLYN` (32,206 resolved): Median 10.59 h, Mean 357.47 h, $P_{90}$ 713.71 h, $P_{99}$ 7,712.22 h.
@@ -148,9 +157,10 @@ We evaluate 3 distinct preprocessing pipelines over the 873 spatial grid cells:
 ### 5.1. Spark MLlib KMeans (Centroid-Based Partitioning)
 - **Model Specification:** Scaled $(x_m, y_m, \ln(1+\text{count}))$, $k$-means|| initialization, $k=2$, seed 42.
 - **Cluster Characteristics (`artifacts/member1/analytics/tables/cluster_summary`):**
-  - **Cluster 0 (Metropolitan Core & Dense Corridors):** 664 grid cells, 93,956 total complaints (95.21% of valid geo complaints; mean 141.5 complaints/cell). Centroid located at $40.73440^\circ\text{N}, -73.87360^\circ\text{W}$ (Queens/Brooklyn core, $x_m = 6,447.87\text{ m}, y_m = 3,803.48\text{ m}$). Dominant borough: `QUEENS`. Dominant complaint: `Illegal Parking`. Mean resolution duration: 359.00 h.
-  - **Cluster 1 (Outer Periphery & Low Intensity):** 209 grid cells, 4,727 total complaints (4.79% of valid geo complaints; mean 22.62 complaints/cell). Centroid located at $40.58754^\circ\text{N}, -74.09725^\circ\text{W}$ (Staten Island / outer periphery, $x_m = -12,427.14\text{ m}, y_m = -12,435.61\text{ m}$). Dominant borough: `STATEN ISLAND`. Dominant complaint: `Illegal Parking`. Mean resolution duration: 606.11 h.
-  - **Reconciliation Check:** $664 + 209 = 873$ cells (100%). $93,956 + 4,727 = 98,683$ complaints (exactly equal to total valid coordinate complaints).
+  - **Cluster 0 (Metropolitan Core & Dense Corridors):** 664 grid cells, 93,956 total complaints (95.21% of valid geo complaints; mean 141.5 complaints/cell). Centroid located at $40.73440^\circ\text{N}, -73.87360^\circ\text{W}$ (Queens/Brooklyn core, $x_m = 6,447.87\text{ m}, y_m = 3,803.48\text{ m}$). Dominant borough: `QUEENS` by grid-cell plurality (298 cells vs Brooklyn's 166; on total complaint volume, Brooklyn leads with 30,928 complaints). Dominant complaint: `Illegal Parking` (264 cells; 14,615 complaints). Resolved-record weighted mean resolution duration: **335.02 h** (replaces unweighted cell average of 359.00 h).
+  - **Cluster 1 (Outer Periphery & Low Intensity):** 209 grid cells, 4,727 total complaints (4.79% of valid geo complaints; mean 22.62 complaints/cell). Centroid located at $40.58754^\circ\text{N}, -74.09725^\circ\text{W}$ (Staten Island / outer periphery, $x_m = -12,427.14\text{ m}, y_m = -12,435.61\text{ m}$). Dominant borough: `STATEN ISLAND` (157 cells; 3,452 complaints). Dominant complaint: `Illegal Parking` (131 cells). Resolved-record weighted mean resolution duration: **463.99 h** (replaces unweighted cell average of 606.11 h).
+  - **Reconciliation Check:** $664 + 209 = 873$ cells (100%). $93,956 + 4,727 = 98,683$ complaints (exactly equal to total valid coordinate complaints). Dominant label basis is clarified: `cluster_summary` reports cell plurality, while underlying volume distributions confirm identical primary complaint types.
+  - **Downstream Interface to Member 3:** Spatial grid cells are persisted with their primary cluster assignment (`spatial_grid_cells.cluster`), enabling Member 3's Streamlit dashboard and resource allocation models to directly consume cluster zoning without rerunning MLlib KMeans.
 - **Strengths:** Fully distributed in PySpark; guaranteed global partitioning; fast convergence ($< 10$ seconds on 873 cells); scales seamlessly to millions of records.
 - **Limitations:** Forces spherical clusters of equal variance in scaled space; sensitive to choice of $k$; cannot identify arbitrary irregular spatial shapes (e.g. transit corridors).
 

@@ -106,7 +106,11 @@ def bar_categories(
 
 
 def timeseries_daily(
-    df: pd.DataFrame, path: Path, period: Any = None, producer: str = ""
+    df: pd.DataFrame,
+    path: Path,
+    period: Any = None,
+    producer: str = "",
+    coverage_meta: dict[str, Any] | None = None,
 ) -> tuple[str | None, str]:
     if df is None or df.empty:
         return _empty(path)
@@ -114,14 +118,32 @@ def timeseries_daily(
     x = pd.to_datetime(d["date"])
     counts = d["complaint_count"].to_numpy(dtype=float)
 
-    # Distinguish complete days from partial boundary cutoff (Jan 12 has 191 records)
-    is_partial = counts < 1000
+    # Explicit period-completeness metadata determines partial days dynamically
+    partial_dates: set[str] = set()
+    if coverage_meta and "partial_day_dates" in coverage_meta:
+        partial_dates = {str(dt) for dt in coverage_meta["partial_day_dates"]}
+    elif "is_partial" in d.columns:
+        partial_dates = set(d.loc[d["is_partial"].astype(bool), "date"].astype(str))
+
+    is_partial = (
+        d["date"].astype(str).isin(partial_dates).to_numpy()
+        if partial_dates
+        else np.zeros(len(d), dtype=bool)
+    )
     full_counts = counts[~is_partial]
     full_mean = float(full_counts.mean()) if len(full_counts) else float(counts.mean())
     all_mean = float(counts.mean())
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    ax.plot(x[~is_partial], counts[~is_partial], marker="o", ms=4, color=_ACCENT, label="Complete days")
+    if np.any(~is_partial):
+        ax.plot(
+            x[~is_partial],
+            counts[~is_partial],
+            marker="o",
+            ms=4,
+            color=_ACCENT,
+            label="Complete days" if np.any(is_partial) else "Observed days",
+        )
     if np.any(is_partial):
         ax.plot(
             x[is_partial],
@@ -130,19 +152,28 @@ def timeseries_daily(
             ms=5,
             color="#d9534f",
             linestyle="none",
-            label="Partial cutoff (Jan 12, 191 rec)",
+            label="Partial cutoff days",
         )
     ax.set_xlabel("Date")
     ax.set_ylabel("Complaint count (records/day)")
     ax.set_title("Daily reported 311 complaint volume")
     ax.legend(fontsize=8)
     fig.autofmt_xdate()
-    takeaway = (
-        f"Full-day volume (Jan 1-11, 11 days) averages {full_mean:,.0f} records/day "
-        f"(range {int(full_counts.min()):,}-{int(full_counts.max()):,}); "
-        f"all 12 days including partial Jan 12 (191 records) average {all_mean:,.0f}. "
-        "Window is too short for seasonal claims."
-    )
+
+    if np.any(is_partial) and len(full_counts) > 0:
+        partial_desc = ", ".join(sorted(partial_dates))
+        takeaway = (
+            f"Full-day volume ({len(full_counts)} days) averages {full_mean:,.0f} records/day "
+            f"(range {int(full_counts.min()):,}-{int(full_counts.max()):,}); "
+            f"all {len(counts)} observed days including partial dates ({partial_desc}) "
+            f"average {all_mean:,.0f} records/day. Window is too short for seasonal claims."
+        )
+    else:
+        takeaway = (
+            f"Daily volume across {len(counts)} observed days averages {all_mean:,.0f} records/day "
+            f"(range {int(counts.min()):,}-{int(counts.max()):,}). "
+            "Window is too short for seasonal claims."
+        )
     return _save(fig, path, period, producer), takeaway
 
 
@@ -444,41 +475,109 @@ def silhouette_curve(
 
 
 def cluster_scatter(
-    df: pd.DataFrame, path: Path, period: Any = None, producer: str = ""
+    df: pd.DataFrame,
+    path: Path,
+    period: Any = None,
+    producer: str = "",
+    centers_df: pd.DataFrame | None = None,
 ) -> tuple[str | None, str]:
     if df is None or df.empty:
         return _empty(path)
-    d = df.dropna(subset=["center_lat", "center_lon"])
+    d = df.dropna(subset=["center_lat", "center_lon"]).copy()
     if d.empty:
         return _empty(path)
-    fig, ax = plt.subplots(figsize=(7.5, 6.5))
-    sizes = 20 + 180 * (d["complaints"] / d["complaints"].max())
-    sc = ax.scatter(
-        d["center_lon"],
-        d["center_lat"],
-        s=sizes,
-        c=d["cluster"],
-        cmap="tab10",
-        alpha=0.75,
-        edgecolor="white",
-        linewidth=0.4,
-    )
-    for _, r in d.iterrows():
-        ax.annotate(
-            f"C{int(r['cluster'])}",
-            (r["center_lon"], r["center_lat"]),
-            fontsize=8,
-            ha="center",
-            va="center",
+
+    fig, ax = plt.subplots(figsize=(8.5, 7.0))
+    n_clusters = int(d["cluster"].nunique()) if "cluster" in d.columns else 0
+
+    # If df contains individual grid cells (e.g. 873 cells in spatial_grid_cells)
+    if len(d) > 10 or ("spatial_id" in d.columns):
+        count_col = "complaint_count" if "complaint_count" in d.columns else "complaints"
+        max_c = (
+            float(d[count_col].max())
+            if count_col in d.columns and d[count_col].max() > 0
+            else 1.0
         )
+        sizes = (
+            8.0 + 45.0 * (d[count_col] / max_c)
+            if count_col in d.columns
+            else 14.0
+        )
+        sc = ax.scatter(
+            d["center_lon"],
+            d["center_lat"],
+            s=sizes,
+            c=d["cluster"],
+            cmap="tab10",
+            alpha=0.6,
+            edgecolor="none",
+            label="Grid cells",
+        )
+        # Overlay cluster centroids if provided
+        if centers_df is not None and not centers_df.empty:
+            cd = centers_df.dropna(subset=["center_lat", "center_lon"]).copy()
+            ax.scatter(
+                cd["center_lon"],
+                cd["center_lat"],
+                s=180,
+                c="red",
+                marker="X",
+                edgecolor="black",
+                linewidth=1.2,
+                label="Centroid",
+                zorder=5,
+            )
+            for _, r in cd.iterrows():
+                ax.annotate(
+                    f" C{int(r['cluster'])}",
+                    (r["center_lon"], r["center_lat"]),
+                    fontsize=10,
+                    fontweight="bold",
+                    color="black",
+                    va="center",
+                    zorder=6,
+                )
+        ax.legend(loc="upper left", fontsize=8)
+        ax.set_title("KMeans spatial clusters: grid cell assignments & centroids")
+        takeaway = (
+            f"{len(d)} grid cells assigned across {n_clusters} KMeans clusters with "
+            "centroids marked; clusters reflect core vs peripheral demand intensity."
+        )
+    else:
+        # Fallback when only cluster centers dataframe is passed
+        sizes = (
+            40 + 160 * (d["complaints"] / d["complaints"].max())
+            if "complaints" in d.columns
+            else 80
+        )
+        sc = ax.scatter(
+            d["center_lon"],
+            d["center_lat"],
+            s=sizes,
+            c=d["cluster"],
+            cmap="tab10",
+            alpha=0.85,
+            edgecolor="white",
+            linewidth=0.6,
+        )
+        for _, r in d.iterrows():
+            ax.annotate(
+                f"C{int(r['cluster'])}",
+                (r["center_lon"], r["center_lat"]),
+                fontsize=9,
+                fontweight="bold",
+                ha="center",
+                va="center",
+            )
+        ax.set_title("KMeans spatial cluster centroids")
+        takeaway = (
+            f"{len(d)} cluster centres shown over valid coordinates; clusters are "
+            "descriptive reporting-intensity groups, not risk labels."
+        )
+
+    fig.colorbar(sc, ax=ax, label="Cluster id")
     ax.set_xlabel("Longitude (deg)")
     ax.set_ylabel("Latitude (deg)")
-    ax.set_title("KMeans spatial clusters (bubble size = complaints)")
-    fig.colorbar(sc, ax=ax, label="Cluster id")
-    takeaway = (
-        f"{len(d)} cluster centres shown over valid coordinates; clusters are "
-        "descriptive reporting-intensity groups, not risk labels."
-    )
     return _save(fig, path, period, producer), takeaway
 
 

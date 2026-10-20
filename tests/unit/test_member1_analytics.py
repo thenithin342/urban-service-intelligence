@@ -150,10 +150,41 @@ def test_timeseries_daily_distinguishes_partial_day(tmp_path: Path):
     dates = [f"2024-01-{i:02d}" for i in range(1, 13)]
     counts = [9000] * 11 + [191]  # 11 complete days + 1 partial day
     df = pd.DataFrame({"date": dates, "complaint_count": counts})
-    p, t = figures.timeseries_daily(df, tmp_path / "ts.png")
+    meta = {"partial_day_dates": ["2024-01-12"]}
+    p, t = figures.timeseries_daily(df, tmp_path / "ts.png", coverage_meta=meta)
     assert p is not None and Path(p).exists()
     assert "Full-day volume" in t
-    assert "191 records" in t
+    assert "2024-01-12" in t
+
+    # Without coverage meta, all days are treated homogeneously without hardcoded cutoff
+    p2, t2 = figures.timeseries_daily(df, tmp_path / "ts2.png")
+    assert p2 is not None and Path(p2).exists()
+    assert "Daily volume across 12 observed days" in t2
+
+
+def test_cluster_scatter_with_grid_cells_and_centers(tmp_path: Path):
+    cells = pd.DataFrame(
+        {
+            "center_lat": [40.71, 40.72, 40.58, 40.59],
+            "center_lon": [-73.95, -73.94, -74.10, -74.11],
+            "cluster": [0, 0, 1, 1],
+            "complaint_count": [150, 200, 25, 30],
+            "spatial_id": ["1:1", "1:2", "2:1", "2:2"],
+        }
+    )
+    centers = pd.DataFrame(
+        {
+            "cluster": [0, 1],
+            "center_lat": [40.715, 40.585],
+            "center_lon": [-73.945, -74.105],
+            "complaints": [350, 55],
+        }
+    )
+    p, t = figures.cluster_scatter(
+        cells, tmp_path / "clusters.png", centers_df=centers
+    )
+    assert p is not None and Path(p).exists()
+    assert "4 grid cells assigned across 2 KMeans clusters" in t
 
 
 def test_hotspot_cell_25_31_queens_geographic_label():
@@ -167,4 +198,5 @@ def test_hotspot_cell_25_31_queens_geographic_label():
     assert round(center_lon, 3) == -73.945
     # Latitude 40.745 is north of Brooklyn (~40.58-40.71) and east of East River in Queens (Long Island City)
     assert center_lat > 40.72  # North of Brooklyn / Queens border
+
 
