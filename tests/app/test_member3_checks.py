@@ -93,6 +93,15 @@ def test_stale_when_coverage_older_than_cleaned_data(empty_root):
     assert any("coverage_end 2024-01-12 older" in p for p in rep["problems"])
 
 
+def test_short_coverage_gap_is_warning_not_stale(empty_root):
+    # Complete-week producers can end up to 6 days before their input.
+    _cleaned_input(empty_root, "2024-01-15")
+    _publish(empty_root, "resolution_summary")  # fixture rows cover 2024-01-12
+    rep = ad.check_table("resolution_summary")
+    assert rep["status"] == "ok"
+    assert any("3 days" in w for w in rep["warnings"])
+
+
 def test_stale_when_generated_before_input_written(empty_root):
     _publish(empty_root, "demand_metrics")
     meta_path = ad.contract_meta_path("demand_metrics")

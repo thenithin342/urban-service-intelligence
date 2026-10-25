@@ -443,6 +443,9 @@ def _history_end(q: dict[str, Any]) -> str | None:
     return None
 
 
+STALE_COVERAGE_GAP_DAYS = 7
+
+
 def check_table(name: str, inputs: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Freshness/validity check for one contract table.
 
@@ -501,13 +504,19 @@ def check_table(name: str, inputs: list[dict[str, Any]] | None = None) -> dict[s
             f"stale: generated_at {generated.isoformat()} older than input data written "
             f"{newest_write.isoformat()}"
         )
-    latest_cov = max((str(i["coverage_end"]) for i in ready if i["coverage_end"]), default=None)
+    latest_cov = max((str(i["coverage_end"]) for i in compare if i["coverage_end"]), default=None)
     if cov_end and latest_cov and cov_end[:10] < latest_cov[:10]:
-        report["status"] = "stale"
-        report["problems"].append(
-            f"stale: coverage_end {cov_end[:10]} older than latest cleaned data coverage "
-            f"{latest_cov[:10]}"
+        gap = (pd.Timestamp(latest_cov[:10]) - pd.Timestamp(cov_end[:10])).days
+        msg = (
+            f"coverage_end {cov_end[:10]} older than cleaned data coverage {latest_cov[:10]}"
         )
+        if gap < STALE_COVERAGE_GAP_DAYS:
+            # Producers that keep complete weeks only (e.g. weekly baskets)
+            # legitimately end up to 6 days before their input.
+            report["warnings"].append(f"{msg} ({gap} days; partial period excluded?)")
+        else:
+            report["status"] = "stale"
+            report["problems"].append(f"stale: {msg}")
     if not generated:
         report["warnings"].append("generated_at_utc not parseable")
     return report
