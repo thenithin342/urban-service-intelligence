@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "contract_version": "1.0.0",
+    "producer": "fixture",
+    "generated_at_utc": "2026-10-25T00:00:00+00:00",
+    "is_fixture": true,
+    "note": "SYNTHETIC CONTRACT FIXTURE - invented values for UI/schema tests only; not a measured result.",
+    "coverage_start": "2024-01-01",
+    "coverage_end": "2024-01-12",
+    "basket_definition": "ZIP x ISO week: distinct complaint_type values per (incident_zip, created_week)",
+    "model_version": "fixture-0"
+  },
+  "rows": [
+    {
+      "antecedent": [
+        "Noise - Street/Sidewalk"
+      ],
+      "consequent": [
+        "Noise - Residential"
+      ],
+      "support": 0.21,
+      "confidence": 0.74,
+      "lift": 1.9,
+      "rule_baskets": 84,
+      "n_baskets": 400,
+      "min_support": 0.05,
+      "min_confidence": 0.3,
+      "basket_definition": "ZIP x ISO week: distinct complaint_type values per (incident_zip, created_week)",
+      "coverage_start": "2024-01-01",
+      "coverage_end": "2024-01-12",
+      "model_version": "fixture-0"
+    },
+    {
+      "antecedent": [
+        "HEAT/HOT WATER"
+      ],
+      "consequent": [
+        "PLUMBING"
+      ],
+      "support": 0.18,
+      "confidence": 0.52,
+      "lift": 1.6,
+      "rule_baskets": 72,
+      "n_baskets": 400,
+      "min_support": 0.05,
+      "min_confidence": 0.3,
+      "basket_definition": "ZIP x ISO week: distinct complaint_type values per (incident_zip, created_week)",
+      "coverage_start": "2024-01-01",
+      "coverage_end": "2024-01-12",
+      "model_version": "fixture-0"
+    },
+    {
+      "antecedent": [
+        "Illegal Parking",
+        "Blocked Driveway"
+      ],
+      "consequent": [
+        "Noise - Street/Sidewalk"
+      ],
+      "support": 0.08,
+      "confidence": 0.35,
+      "lift": 1.1,
+      "rule_baskets": 32,
+      "n_baskets": 400,
+      "min_support": 0.05,
+      "min_confidence": 0.3,
+      "basket_definition": "ZIP x ISO week: distinct complaint_type values per (incident_zip, created_week)",
+      "coverage_start": "2024-01-01",
+      "coverage_end": "2024-01-12",
+      "model_version": "fixture-0"
+    }
+  ]
+}

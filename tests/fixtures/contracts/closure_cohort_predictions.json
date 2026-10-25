@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "contract_version": "1.0.0",
+    "producer": "fixture",
+    "generated_at_utc": "2026-10-25T00:00:00+00:00",
+    "is_fixture": true,
+    "note": "SYNTHETIC CONTRACT FIXTURE - invented values for UI/schema tests only; not a measured result.",
+    "coverage_start": "2024-01-01",
+    "coverage_end": "2024-01-12",
+    "model_version": "fixture-0"
+  },
+  "rows": [
+    {
+      "borough": "BROOKLYN",
+      "complaint_type": "HEAT/HOT WATER",
+      "n_complaints": 120,
+      "mean_closure_probability": 0.78,
+      "expected_open_after_7d": 26.4,
+      "observed_closure_rate_7d": 0.8,
+      "prediction_window_start": "2024-01-09",
+      "prediction_window_end": "2024-01-12",
+      "model_version": "fixture-0"
+    },
+    {
+      "borough": "QUEENS",
+      "complaint_type": "Illegal Parking",
+      "n_complaints": 150,
+      "mean_closure_probability": 0.97,
+      "expected_open_after_7d": 4.5,
+      "observed_closure_rate_7d": 0.98,
+      "prediction_window_start": "2024-01-09",
+      "prediction_window_end": "2024-01-12",
+      "model_version": "fixture-0"
+    }
+  ]
+}
