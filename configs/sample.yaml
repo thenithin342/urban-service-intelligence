@@ -75,3 +75,28 @@ member3:
   lag_cap_days: 60                     # close-lag clip; must be >= window_days
   scoring_version: member3-priority-v1
   spark_master: local[2]
+
+# Member 2 mining / closure modeling / evaluation (src/mining, src/modeling/
+# resolution.py, src/evaluation, scripts/run_member2_*.py). Outputs are
+# gitignored under artifacts/member2 at the paths in docs/data_contracts.md.
+# Semantics: docs/member2/semantics.md.
+member2:
+  outdir: artifacts/member2
+  basket_granularity: week       # (incident_zip, created_week) baskets
+  drop_partial_weeks: false      # sample week of 2024-01-08 has 5 days
+  min_support: 0.6
+  min_confidence: 0.8
+  support_grid: [0.5, 0.6, 0.7, 0.8]
+  confidence_grid: [0.5, 0.7, 0.9]
+  secondary_granularity: day     # (incident_zip, created_day) sensitivity
+  secondary_support_grid: [0.1, 0.2, 0.3, 0.4]
+  secondary_min_support: 0.2
+  secondary_min_confidence: 0.8
+  closure_horizon_days: 7
+  train_cutoff: '2024-01-09'     # test = created_day 2024-01-09..2024-01-12
+  validation_days: 2             # train tail 2024-01-07..08 for model selection
+  label_embargo_days: 0          # sample too short for an embargo (see results)
+  top_categories: 40
+  smoothing_alpha: 20.0
+  min_cohort_n: 30
+  seed: 42
