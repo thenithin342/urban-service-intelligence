@@ -54,3 +54,24 @@ member1:
   dbscan_sample_cap: 20000     # bounded sample for single-node DBSCAN
   dbscan_seed: 42
   max_collect_rows: 20000      # bounded driver collection guard for tables
+
+# Member 3 advisory priority scoring + backtest (src/prioritization,
+# scripts/run_member3_priorities.py; formula in docs/member3/priority_scoring.md).
+# The score is an advisory operational priority, not a staffing optimum.
+member3:
+  input: data/processed/nyc311_clean   # or data/processed/member1_history (--input)
+  location_type: borough               # borough | zip
+  window_days: 7                       # scoring / target window length (days)
+  step_days: 7                         # backtest window step (days)
+  weights:                             # non-negative, must sum to 1
+    demand: 0.5
+    backlog: 0.3
+    delay: 0.2
+  min_delay_records: 5                 # delay is null below this many resolved records
+  delay_lookback_days: null            # null = all resolved history before the cut-off
+  backtest_k: [10, 25, 50]
+  random_seed: 42                      # random-ranking baseline
+  partial_day_ratio: 0.5               # drop trailing days below 0.5 x median volume
+  lag_cap_days: 60                     # close-lag clip; must be >= window_days
+  scoring_version: member3-priority-v1
+  spark_master: local[2]

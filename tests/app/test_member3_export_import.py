@@ -87,3 +87,53 @@ def test_fixture_rules_are_labelled_on_page(empty_root):
     assert "NOT results" in warnings
     infos = " ".join(str(i.value) for i in at.info)
     assert "not causation" in infos
+
+
+def _priority_tables(root) -> None:
+    common = {"location_type": "borough", "window_start": "2024-01-01",
+              "window_end": "2024-01-07", "scoring_version": "test-v1"}
+    scores = pd.DataFrame(
+        [
+            {"location": "BRONX", "complaint_type": "Heat", "demand_value": 10.0,
+             "backlog_value": 4.0, "delay_value": 30.0, "demand_component": 1.0,
+             "backlog_component": 1.0, "delay_component": 1.0, "priority_score": 1.0,
+             "rank": 1, "center_lat": 40.84, "center_lon": -73.88, **common},
+            {"location": "QUEENS", "complaint_type": "Noise", "demand_value": 2.0,
+             "backlog_value": 0.0, "delay_value": None, "demand_component": 0.0,
+             "backlog_component": 0.0, "delay_component": 0.0, "priority_score": 0.0,
+             "rank": 2, "center_lat": 40.72, "center_lon": -73.80, **common},
+        ]
+    )
+    weights = {"demand": 0.5, "backlog": 0.3, "delay": 0.2}
+    contracts.write_table(scores, root, "priority_scores",
+                          {"producer": "test", "weights": weights,
+                           "demand_source": "observed", "backlog_source": "observed"})
+    bt = pd.DataFrame(
+        [
+            {"window_start": "2024-01-01", "window_end": "2024-01-07",
+             "target_start": "2024-01-08", "target_end": "2024-01-14", "method": m, "k": 1,
+             "precision_at_k": p, "spearman": r, "n_units": 2}
+            for m, p, r in (("priority_score", 1.0, 1.0), ("volume_only", 1.0, 1.0),
+                            ("random", 0.0, None))
+        ]
+    )
+    contracts.write_table(bt, root, "priority_backtest", {"producer": "test"})
+
+
+def test_priorities_page_renders_published_scores(empty_root):
+    _priority_tables(empty_root)
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.switch_page("views/priorities.py")
+    at.run()
+    assert not at.exception, [e.message for e in at.exception]
+    metrics = {m.label: str(m.value) for m in at.metric}
+    assert metrics["Units ranked"] == "2"
+    assert metrics["Scoring version"] == "test-v1"
+    table = at.dataframe[0].value
+    assert table["rank"].tolist() == [1, 2]
+    assert table["location"].tolist() == ["BRONX", "QUEENS"]
+    summary = at.dataframe[1].value.set_index("method")
+    assert summary.loc["random", "mean_precision_at_k"] == 0.0
+    assert "0.5 x demand_component" in " ".join(str(m.value) for m in at.markdown)
+    assert "not a proven staffing optimum" in " ".join(str(c.value) for c in at.caption)

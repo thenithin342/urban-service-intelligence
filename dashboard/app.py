@@ -31,7 +31,8 @@ PAGES = {
         st.Page(str(VIEWS / "patterns.py"), title="Pattern Explorer"),
         st.Page(str(VIEWS / "forecasts.py"), title="Forecasts and Closure"),
     ],
-    "Integration (Member 3)": [
+    "Decision support (Member 3)": [
+        st.Page(str(VIEWS / "priorities.py"), title="Priorities"),
         st.Page(str(VIEWS / "status.py"), title="Output Status"),
     ],
 }

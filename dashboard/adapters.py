@@ -434,10 +434,10 @@ def _history_end(q: dict[str, Any]) -> str | None:
     for key in ("coverage_end", "period_end", "end_inclusive", "last_day"):
         if q.get(key):
             return str(q[key])[:10]
-    daily = q.get("daily_counts") or q.get("daily") or {}
+    daily = q.get("daily_rows") or q.get("daily_counts") or q.get("daily") or {}
     if isinstance(daily, dict) and daily:
         return max(str(k)[:10] for k in daily)
-    end = q.get("end") or (q.get("config") or {}).get("end")
+    end = q.get("event_end_exclusive") or q.get("end") or (q.get("config") or {}).get("end")
     if end:  # half-open exclusive end
         return str((pd.Timestamp(end) - pd.Timedelta(days=1)).date())
     return None
