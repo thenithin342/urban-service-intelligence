@@ -71,4 +71,4 @@ Unit tests cover leap day/exclusive bounds, complete-day resume, checksums,
 zero days, keyset pages, duplicates, interruptions, source count drift and budgets.
 The Spark integration test uses a tiny synthetic fixture and checks Parquet
 readback, acquisition dates, unresolved durations and failure on tampering.
-Real measured coverage and commands are saved in `PROGRESS_MEMBER1_PHASE4.md`.
+Real measured coverage and commands are saved in `reports/member1/premerge_audit.md`.

@@ -9,16 +9,15 @@ prototype. Advisory outputs only, NOT a municipal dispatch tool.
 ## Project status
 
 - Phase 0 (repository, environment, Spark smoke test): done.
-  See `PROGRESS_PHASE0_PHASE1.md`.
+  See `docs/decisions.md`.
 - Phase 1 (bounded acquisition, profiling, EDA): done.
-  See `PROGRESS_PHASE0_PHASE1.md` and `reports/data_quality.md`.
+  See `reports/data_quality.md` and `reports/methodology.md`.
 - Phase 2 (PySpark ETL to partitioned Parquet plus a machine-readable
-  quality report): done. See `PROGRESS_PHASE2.md` and
-  `reports/audit_phase2.md`.
+  quality report): done. See `reports/audit_phase2.md`.
 - Member 1 Phase 3 (Spark EDA, spatial analysis, comparative clustering):
-  implemented; see `PROGRESS_MEMBER1_PHASE3.md` for saved evidence.
+  implemented; see `reports/member1/phase3_findings.md` for saved evidence.
 - Member 1 Phase 4 (bounded historical expansion and coverage audit):
-  see `PROGRESS_MEMBER1_PHASE4.md` for current verification and data coverage.
+  implemented; see `reports/member1/premerge_audit.md` for verification and coverage.
 - Member 1 Phases 5-8 (demand forecasting, forecast handoff, benchmarks,
   final audit): pending. Mining, closure models and dashboard integration
   belong to Members 2 and 3; their completion is not implied here.
