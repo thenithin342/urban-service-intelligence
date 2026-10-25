@@ -4,7 +4,7 @@ import json
 import math
 import statistics
 from collections import defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from pyspark.ml import PipelineModel
@@ -13,6 +13,7 @@ from pyspark.sql import functions as F
 from src.evaluation.benchmark import read_counts
 from src.ingestion.downloader import sha256_file
 from src.ingestion.history import save_json
+from src.modeling.demand import MODELS
 
 
 def independent_metrics(rows):
@@ -23,7 +24,7 @@ def independent_metrics(rows):
             "wape": sum(abs(e) for e in errors) / actual if actual else None}
 
 
-def check_prediction_rows(rows, daily):
+def check_prediction_rows(rows, daily, expected_keys=None):
     seen = set()
     for row in rows:
         key = tuple(row[c] for c in ("model", "split", "forecast_origin", "borough", "horizon_days"))
@@ -43,6 +44,41 @@ def check_prediction_rows(rows, daily):
             expected = sum(daily[(row["target_date"] - timedelta(days=d), row["borough"])] for d in offsets) / len(offsets)
             if not math.isclose(row["predicted_count"], expected, abs_tol=1e-9):
                 raise ValueError("baseline prediction differs from independent lookup")
+    if expected_keys is not None and seen != expected_keys:
+        raise ValueError("held-out model/origin/geography/horizon coverage is incomplete")
+
+
+def check_future_rows(future, daily, selected, end):
+    origin = date.fromisoformat(end)
+    expected = {(borough, h) for _, borough in daily for h in range(1, 8)}
+    keys = [(row["borough"], row["horizon_days"]) for row in future]
+    if len(keys) != len(expected) or set(keys) != expected:
+        raise ValueError("future forecast is missing geography/horizon rows")
+    for row in future:
+        if (row["actual_count"] is not None or row["model"] != selected
+                or row["fit_cutoff"] != origin or row["forecast_origin"] != origin
+                or row["target_date"] != origin + timedelta(days=row["horizon_days"])
+                or not math.isfinite(row["predicted_count"]) or row["predicted_count"] < 0):
+            raise ValueError("future forecast contract failed")
+        if selected in MODELS[:2]:
+            offsets = (7,) if selected == "seasonal_naive" else (7, 14, 21, 28)
+            value = sum(daily[(row["target_date"] - timedelta(days=d), row["borough"])] for d in offsets) / len(offsets)
+            if not math.isclose(row["predicted_count"], value, abs_tol=1e-9):
+                raise ValueError("future baseline differs from independent lookup")
+
+
+def check_benchmark_coverage(bench, cfg):
+    scales = {int(n) for n in cfg["scales"]}
+    settings = {(engine, n, p) for n in scales for engine, partitions in
+                (("pandas", [0]), ("spark", sorted({2, *map(int, cfg["partitions"])}) if n == max(scales) else [2]))
+                for p in partitions}
+    expected = {(*setting, repeat) for setting in settings for repeat in range(int(cfg["repetitions"]))}
+    keys = [(r["engine"], r["rows"], r["partitions"], r["repeat"]) for r in bench["trials"]]
+    groups = [(r["engine"], r["rows"], r["partitions"]) for r in bench["summary"]]
+    if (len(keys) != len(expected) or set(keys) != expected
+            or len(groups) != len(settings) or set(groups) != settings
+            or {int(n) for n in bench["inputs"]} != scales):
+        raise ValueError("benchmark trials, summaries or input scales are incomplete")
 
 
 def bounded_rows(frame, cap=20000):
@@ -54,6 +90,7 @@ def bounded_rows(frame, cap=20000):
 
 def audit_member1(spark, cfg, benchmark_cfg, root):
     out = root / cfg["output_dir"]
+    (out / "final_audit.json").unlink(missing_ok=True)
     meta = json.loads((out / "model_manifest.json").read_text())
     if meta["seed"] != cfg["seed"]:
         raise ValueError("configuration seed changed since training")
@@ -64,9 +101,13 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
     daily = {(r["created_day"], r["borough"]): r["count_0"]
              for r in bounded_rows(spark.read.parquet(str(out / "daily")))}
     predictions = bounded_rows(spark.read.parquet(str(out / "predictions")))
-    check_prediction_rows(predictions, daily)
     cutoffs = {"validation": cfg["train_end"], "test": cfg["validation_end"]}
     ends = {"validation": cfg["validation_end"], "test": meta["coverage"]["end"]}
+    expected = {(model, split, origin, borough, h)
+                for split, cutoff in cutoffs.items() for origin, borough in daily
+                if date.fromisoformat(cutoff) <= origin <= date.fromisoformat(ends[split]) - timedelta(days=7)
+                for model in MODELS for h in range(1, 8)}
+    check_prediction_rows(predictions, daily, expected)
     for row in predictions:
         if (str(row["fit_cutoff"]) != cutoffs.get(row["split"])
                 or str(row["target_date"]) > ends[row["split"]]):
@@ -99,27 +140,19 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
     if meta["selected_model"] != min(validation, key=lambda r: (r["mae"], r["model"]))["model"]:
         raise ValueError("model was not selected by validation MAE")
     future = bounded_rows(spark.read.parquet(str(out / "future")))
-    if len(future) != 7 * len({key[1] for key in daily}):
-        raise ValueError("future forecast is missing geography/horizon rows")
-    future_keys = set()
-    for row in future:
-        key = (row["borough"], row["horizon_days"])
-        if (key in future_keys or row["actual_count"] is not None
-                or row["model"] != meta["selected_model"]
-                or not 1 <= row["horizon_days"] <= 7
-                or row["fit_cutoff"] != row["forecast_origin"]
-                or not math.isfinite(row["predicted_count"]) or row["predicted_count"] < 0
-                or str(row["forecast_origin"]) != meta["coverage"]["end"]
-                or (row["target_date"] - row["forecast_origin"]).days != row["horizon_days"]):
-            raise ValueError("future forecast contract failed")
-        future_keys.add(key)
+    check_future_rows(future, daily, meta["selected_model"], meta["coverage"]["end"])
+    best_ml = min((r for r in validation if r["model"] not in MODELS[:2]),
+                  key=lambda r: (r["mae"], r["model"]))["model"]
+    required = {meta["selected_model"], best_ml} - set(MODELS[:2])
+    if set(meta["retained_models"]) != required or meta["best_validation_mllib"] != best_ml:
+        raise ValueError("required retained MLlib models are missing or differ from validation selection")
     model_checks = {}
     features = spark.read.parquet(str(out / "features"))
     for name, path in meta["retained_models"].items():
         model = PipelineModel.load(path)
         check = model.transform(features.filter(F.col("forecast_origin") == F.lit(meta["coverage"]["end"]).cast("date")))
         if (check.count() != len(future) or check.filter(F.isnan("raw_prediction")
-                | F.col("raw_prediction").isNull()).limit(1).count()):
+                | F.col("raw_prediction").isNull() | (F.abs("raw_prediction") == float("inf"))).limit(1).count()):
             raise ValueError("retained Spark PipelineModel could not reproduce valid predictions")
         model_checks[name] = [type(stage).__name__ for stage in model.stages]
     handoff = bounded_rows(spark.read.parquet(str(out / "priority_features")))
@@ -135,6 +168,7 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
             raise ValueError("handoff and forecast totals differ")
     benchmark_path = root / benchmark_cfg["output_dir"] / "benchmark.json"
     bench = json.loads(benchmark_path.read_text())
+    check_benchmark_coverage(bench, benchmark_cfg)
     for info in bench["inputs"].values():
         if sha256_file(info["path"]) != info["sha256"]:
             raise ValueError("benchmark input checksum changed")
@@ -144,6 +178,8 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
         if trial["engine"] == "pandas":
             path = path.with_suffix(".csv")
         counts = read_counts(path)
+        if sum(counts.values()) != trial["valid_coordinate_rows"]:
+            raise ValueError("benchmark result row totals differ from the measured trial")
         if trial["rows"] not in references:
             references[trial["rows"]] = counts
         if counts != references[trial["rows"]]:

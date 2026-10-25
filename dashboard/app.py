@@ -11,7 +11,6 @@ ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT / "artifacts" / "eda_sample"
 
 
-@st.cache_data
 def load_csv(path: Path) -> pd.DataFrame | None:
     if not path.exists():
         return None

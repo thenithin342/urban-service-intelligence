@@ -82,6 +82,71 @@ Added unit/integration coverage checks incomplete calendars, illegal split dates
 
 **Verification:** full regression suite: 100 passed, 1 upstream PySpark distutils deprecation warning in 1056.32 seconds. A seed-change rejection case added after full-suite collection was included in a separate focused run: 7 passed, 1 upstream warning in 3.19 seconds. Ruff and Git whitespace checks passed. Logs: pytest_full.log, final_units.log and ruff.log under artifacts/member1/demand.
 
+## Follow-up bug audit (2026-10-25)
+
+Reviewed the ingestion/ETL, EDA/geospatial/clustering, forecasting, handoff,
+benchmark and dashboard entry points for a single local operator using the
+existing bounded data. Confirmed fixes:
+
+1. A failed sample API page previously published a partial/empty replacement and
+   returned success. It now raises before changing the published sample or manifest.
+   Regression cases cover failure on the first page and after a successful page.
+2. The final audit could accept missing model/horizon/trial groups, unchecked future
+   baseline values, or absent retained MLlib models. It now requires the complete
+   expected output sets and independently checks future baseline counts. It also
+   clears an old PASS file before starting, so a failed rerun cannot leave stale success.
+3. SQL null comparisons let missing forecast origins, target dates and model
+   versions through handoff validation. Required fields now have explicit null checks.
+4. ETL evaluated missing-complaint flags after replacing blanks with UNKNOWN.
+   Flags now evaluate on the source columns before normalization.
+5. A Spark benchmark directory without part files was read as an empty result.
+   Missing parts now fail, and audited output totals must match each measured trial.
+6. Weekly EDA called a fixed-frequency rounding operation before its weekly branch
+   and crashed. Calendar-week grouping now runs directly; a Sunday/Monday boundary
+   regression preserves both weeks and their counts.
+7. YAML's valid unquoted date values crashed the demand config loader, and accepted
+   numeric-string seeds were passed through unchanged. Dates and seeds now normalize
+   before reaching the training code; missing split keys are validated explicitly.
+8. Spark's CSV reader silently assigned reordered header columns to the fixed
+   schema by position. It now validates the header against the canonical ingestion
+   schema and rejects mismatches; quoted multiline fields remain supported.
+9. The dashboard cached its small CSV tables by path forever, so regenerated
+   files stayed stale on rerun. Removing that cache makes each rerun read the
+   current aggregates. An AppTest regression rewrites a category and verifies
+   that the displayed input updates without exceptions.
+
+Saved pre-fix reproductions: repro_units.log (3 failed), repro_spark.log (2 failed),
+repro_config_weekly.log (2 failed), and header_repro.log (1 failed), under
+artifacts/member1/bugfix_audit.
+Full regression suite: 109 passed, 1 upstream PySpark deprecation warning in
+910.88 seconds. The late CSV-header check and repaired ETL/handoff/CSV parity
+cases passed in a separate 5-test Spark run (84.11 seconds). The two late
+weekly/config cases were included in a separate 72-test unit run; these runs
+overlap and must not be added together. UI refresh verification uses the installed
+Python 3.13 / Streamlit 1.48 UI runtime only; Spark remains on Python 3.10.
+The pinned UI environment remains unverified. Lint and whitespace checks passed.
+The standalone AppTest refresh check passed (Noise changed to Road, no exceptions).
+Pytest AppTest attempts under output capture timed out on this host; the uncaptured
+check passed. No capture-dependent UI test is included. A later unit rerun hit an
+intermittent Windows access-denied error replacing a manifest under OneDrive;
+repeating the suite in a fresh temporary directory outside OneDrive passed all
+72 cases in 37.34 seconds. Logs preserve the failure and the successful rerun.
+Unrelated edits made during the paused turn remain outside this audit commit.
+The staged demand producer SHA256 matches the producer recorded by the successful
+real-data audit; later local forecasting edits require their own rerun before merging.
+
+The refreshed real-data model/handoff/artifact audit passed: 4,284 held-out rows,
+42 future rows, 6 handoff rows, 4 metric tables, the retained MLlib model and all
+24 saved benchmark trials. All 12 model/split metric groups match the preceding
+run exactly (maximum absolute MAE/RMSE/WAPE difference 0.0). A source scan measured
+zero missing complaint types in both the 799,439-row history and 100,000-row sample,
+so the flag repair does not invalidate their existing quality counts.
+
+These are correctness reruns alongside regression tests, not new performance
+measurements. The isolated benchmark and original fit timings above remain the
+recorded performance evidence. Logs, source-impact counts and model comparison
+evidence are saved in artifacts/member1/bugfix_audit; generated data/models remain ignored.
+
 ## Reproduce
 
 Prerequisites: the documented Python 3.10 / Spark 3.5.3 / Java 17 / Windows Hadoop setup and verified Phase 4 history. Raw/processed files and generated artifacts/models are ignored, so a fresh clone must run the acquisition and ETL first.

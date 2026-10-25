@@ -35,11 +35,14 @@ MODELS = ["seasonal_naive", "weekday_mean", "lr_scaled", "lr_unscaled", "random_
 def load_demand_config(path):
     with open(path, encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)
-    for key in ("input_parquet", "source_manifest", "quality_report", "output_dir", "seed"):
+    if not isinstance(cfg, dict):
+        raise TypeError("demand configuration must be a mapping")
+    for key in ("input_parquet", "source_manifest", "quality_report", "output_dir", "seed", "train_end", "validation_end"):
         if key not in cfg:
             raise ValueError(f"missing demand configuration: {key}")
-    train, validation = date.fromisoformat(cfg["train_end"]), date.fromisoformat(cfg["validation_end"])
-    if train >= validation or int(cfg["seed"]) < 0:
+    train, validation = date.fromisoformat(str(cfg["train_end"])), date.fromisoformat(str(cfg["validation_end"]))
+    cfg.update(train_end=train.isoformat(), validation_end=validation.isoformat(), seed=int(cfg["seed"]))
+    if train >= validation or cfg["seed"] < 0:
         raise ValueError("ordered train/validation dates and nonnegative seed required")
     return cfg
 

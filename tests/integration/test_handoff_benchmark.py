@@ -38,6 +38,10 @@ def test_handoff_zero_denominator_and_geographic_scope(spark):
     assert rows["QUEENS"]["source_snapshot_max"] is None
     with pytest.raises(ValueError, match="unobserved"):
         build_handoff(daily, future.withColumn("actual_count", F.lit(1)), raw, coverage)
+    for column in ("forecast_origin", "target_date", "model_version"):
+        with pytest.raises(ValueError, match="unobserved"):
+            build_handoff(daily, future.withColumn(column, F.lit(None).cast(future.schema[column].dataType)),
+                          raw, coverage)
 
 
 def test_benchmark_engines_match_on_quoted_missing_invalid_fields(spark, tmp_path):

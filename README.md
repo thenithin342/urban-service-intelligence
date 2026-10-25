@@ -25,7 +25,8 @@ prototype. Advisory outputs only, NOT a municipal dispatch tool.
   Members 2 and 3; their completion is not implied here.
 
 The latest Member 1 end-to-end verification, fixes and known limits are recorded
-in `reports/member1/phases5_to_8_results.md`. The earlier pipeline audit remains
+in `reports/member1/phases5_to_8_results.md`, including the follow-up bug fixes.
+The earlier pipeline audit remains
 in `reports/member1/premerge_audit.md`.
 
 ## Technology stack

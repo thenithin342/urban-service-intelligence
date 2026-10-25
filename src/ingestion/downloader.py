@@ -153,9 +153,8 @@ def download_sample(
 ) -> dict[str, Any]:
     """Page through SODA until target_rows or exhaustion. Writes CSV + manifest.
 
-    Returns the manifest dict. Raises on fatal errors; records per-page
-    failures in manifest['failures'] only if fetcher recovers (not used here:
-    fetch_page raises after retries).
+    Returns the manifest dict. A failed page raises before publishing any
+    sample or manifest, preserving the previous successful download.
     """
     import os
     import sys
@@ -207,10 +206,9 @@ def download_sample(
         try:
             _log(f"[download] page {pages + 1}: limit={limit} offset={offset}")
             page = fetcher(params)
-        except Exception as e:  # noqa: BLE001 (injected fetchers raise anything; recorded)
-            failures.append(f"offset={offset}: {e}")
+        except Exception as e:
             _log(f"[download] FAILED offset={offset}: {e}")
-            break
+            raise
         pages += 1
         if not page:
             _log("[download] empty page, stopping")

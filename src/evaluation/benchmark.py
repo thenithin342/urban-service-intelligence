@@ -84,6 +84,8 @@ def spark_task(spark, path, output, partitions):
 def read_counts(path):
     path = Path(path)
     files = sorted(path.glob("part-*.csv")) if path.is_dir() else [path]
+    if not files:
+        raise ValueError(f"missing benchmark part files: {path}")
     values = {}
     for item in files:
         with item.open(encoding="utf-8", newline="") as stream:

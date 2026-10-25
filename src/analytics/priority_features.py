@@ -1,5 +1,7 @@
 """Member 1 forecast handoff; no priority scores, weights or recommendations."""
 
+from functools import reduce
+
 from pyspark.sql import functions as F
 
 from src.analytics.geospatial import _cell_columns, filter_valid_coords
@@ -8,7 +10,10 @@ from src.analytics.geospatial import _cell_columns, filter_valid_coords
 def build_handoff(daily, future, raw, coverage):
     end = coverage["end"]
     snapshots = coverage.get("snapshot_dates") or []
-    bad = future.filter((F.col("forecast_origin") != F.lit(end).cast("date"))
+    required = ["forecast_origin", "target_date", "borough", "horizon_days", "model_version"]
+    missing = reduce(lambda a, b: a | b, [F.col(name).isNull() for name in required])
+    bad = future.filter(missing | (F.trim("model_version") == "")
+                        | (F.col("forecast_origin") != F.lit(end).cast("date"))
                         | F.col("actual_count").isNotNull()
                         | (F.col("horizon_days") < 1) | (F.col("horizon_days") > 7)
                         | (F.col("target_date") != F.expr("date_add(forecast_origin, horizon_days)"))

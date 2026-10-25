@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import requests
 
 from src.ingestion.downloader import (
@@ -120,7 +121,8 @@ def test_fetch_page_retries_transport_error():
     assert sess.calls == 2
 
 
-def test_download_sample_paging_and_manifest(tmp_path):
+def test_download_sample_paging_and_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.ingestion.downloader.fetch_metadata", lambda *args: {})
     pages = [
         [{"unique_key": "1", "borough": "QUEENS"},
          {"unique_key": "2", "borough": "BRONX"}],
@@ -163,3 +165,26 @@ def test_download_sample_paging_and_manifest(tmp_path):
     # provenance present
     assert saved["request_count"] >= 2
     assert saved["where"] == "x"
+
+
+@pytest.mark.parametrize("failed_page", [0, 1])
+def test_failed_download_preserves_published_sample(tmp_path, monkeypatch, failed_page):
+    monkeypatch.setattr("src.ingestion.downloader.fetch_metadata", lambda *args: {})
+    raw, manifest = tmp_path / "sample.csv", tmp_path / "manifest.json"
+    raw.write_text("previous verified data")
+    manifest.write_text('{"previous": true}')
+    calls = 0
+
+    def fetcher(params):
+        nonlocal calls
+        if calls == failed_page:
+            raise requests.ConnectionError("source unavailable")
+        calls += 1
+        return [{"unique_key": "1"}]
+
+    cfg = {"base_url": "http://example", "target_rows": 2, "page_size": 1,
+           "out_raw": raw.name, "out_manifest": manifest.name}
+    with pytest.raises(requests.ConnectionError, match="unavailable"):
+        download_sample(cfg, tmp_path, fetcher=fetcher)
+    assert raw.read_text() == "previous verified data"
+    assert manifest.read_text() == '{"previous": true}'

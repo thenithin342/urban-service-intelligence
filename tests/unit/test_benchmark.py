@@ -5,8 +5,13 @@ import json
 
 import pytest
 
-from src.evaluation.benchmark import prepare_inputs
+from src.evaluation.benchmark import prepare_inputs, read_counts
 from src.ingestion.downloader import DEFAULT_FIELDS, sha256_file
+
+
+def test_missing_benchmark_part_files_are_not_empty_results(tmp_path):
+    with pytest.raises(ValueError, match=r"missing.*part"):
+        read_counts(tmp_path)
 
 
 def test_benchmark_prefixes_are_exact_and_do_not_synthesize_rows(tmp_path):

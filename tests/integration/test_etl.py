@@ -113,6 +113,8 @@ def test_validation_flags():
         assert by_key["1"]["borough"] == "BROOKLYN"  # normalized
         assert by_key["4"]["borough"] is None  # Unspecified -> null
         assert by_key["4"]["complaint_type"] == "UNKNOWN"
+        assert "missing_complaint" in by_key["4"]["data_quality_flags"]
+        assert m["flag_breakdown"]["missing_complaint"] == 1
         assert by_key["4"]["incident_zip"] is None
         assert by_key["4"]["latitude"] is None  # outside NYC box
         assert "invalid_coords" in by_key["4"]["data_quality_flags"]
