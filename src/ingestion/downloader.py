@@ -190,7 +190,7 @@ def download_sample(
             )
         fetcher = _fetch
 
-    acquired_at = datetime.now(timezone.utc).isoformat()  # noqa: UP017 (py3.10)
+    acquired_at = datetime.now(timezone.utc).isoformat()
     request_log: list[str] = []
     all_records: list[dict[str, Any]] = []
     offset = 0

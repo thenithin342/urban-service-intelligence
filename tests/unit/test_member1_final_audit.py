@@ -45,6 +45,17 @@ def test_audit_requires_all_expected_predictions():
         check_prediction_rows([], {}, {("seasonal_naive", "test", date(2024, 2, 1), "QUEENS", 1)})
 
 
+def test_audit_keys_include_category():
+    origin, target = date(2024, 1, 31), date(2024, 2, 1)
+    rows = [{"model": "fixture", "split": "test", "forecast_origin": origin, "fit_cutoff": origin,
+             "target_date": target, "borough": "QUEENS", "complaint_type": category,
+             "horizon_days": 1, "actual_count": n, "predicted_count": float(n)}
+            for category, n in (("A", 10), ("B", 20))]
+    counts = {(target, "QUEENS", r["complaint_type"]): r["actual_count"] for r in rows}
+    expected = {("fixture", "test", origin, "QUEENS", c, 1) for c in ("A", "B")}
+    check_prediction_rows(rows, counts, expected)
+
+
 def test_future_baseline_and_geography_are_checked_independently():
     origin = date(2024, 2, 1)
     daily = {(origin - timedelta(days=i), "QUEENS"): i for i in range(28)}

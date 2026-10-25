@@ -13,7 +13,7 @@ from pyspark.sql import functions as F
 from src.evaluation.benchmark import read_counts
 from src.ingestion.downloader import sha256_file
 from src.ingestion.history import save_json
-from src.modeling.demand import MODELS
+from src.modeling.demand import MODELS, category_policy
 
 
 def independent_metrics(rows):
@@ -25,9 +25,11 @@ def independent_metrics(rows):
 
 
 def check_prediction_rows(rows, daily, expected_keys=None):
+    daily = {key if len(key) == 3 else (*key, "ALL"): value for key, value in daily.items()}
     seen = set()
     for row in rows:
-        key = tuple(row[c] for c in ("model", "split", "forecast_origin", "borough", "horizon_days"))
+        category = row.get("complaint_type", "ALL")
+        key = (row["model"], row["split"], row["forecast_origin"], row["borough"], category, row["horizon_days"])
         if key in seen:
             raise ValueError("duplicate prediction key")
         seen.add(key)
@@ -36,12 +38,12 @@ def check_prediction_rows(rows, daily, expected_keys=None):
                 or not 1 <= row["horizon_days"] <= 7
                 or not math.isfinite(row["predicted_count"]) or row["predicted_count"] < 0):
             raise ValueError("invalid time boundary or prediction")
-        key = (row["target_date"], row["borough"])
+        key = (row["target_date"], row["borough"], category)
         if row["actual_count"] != daily[key]:
             raise ValueError("prediction label differs from verified daily count")
         if row["model"] in ("seasonal_naive", "weekday_mean"):
             offsets = (7,) if row["model"] == "seasonal_naive" else (7, 14, 21, 28)
-            expected = sum(daily[(row["target_date"] - timedelta(days=d), row["borough"])] for d in offsets) / len(offsets)
+            expected = sum(daily[(row["target_date"] - timedelta(days=d), row["borough"], category)] for d in offsets) / len(offsets)
             if not math.isclose(row["predicted_count"], expected, abs_tol=1e-9):
                 raise ValueError("baseline prediction differs from independent lookup")
     if expected_keys is not None and seen != expected_keys:
@@ -49,9 +51,10 @@ def check_prediction_rows(rows, daily, expected_keys=None):
 
 
 def check_future_rows(future, daily, selected, end):
+    daily = {key if len(key) == 3 else (*key, "ALL"): value for key, value in daily.items()}
     origin = date.fromisoformat(end)
-    expected = {(borough, h) for _, borough in daily for h in range(1, 8)}
-    keys = [(row["borough"], row["horizon_days"]) for row in future]
+    expected = {(borough, category, h) for _, borough, category in daily for h in range(1, 8)}
+    keys = [(row["borough"], row.get("complaint_type", "ALL"), row["horizon_days"]) for row in future]
     if len(keys) != len(expected) or set(keys) != expected:
         raise ValueError("future forecast is missing geography/horizon rows")
     for row in future:
@@ -62,7 +65,8 @@ def check_future_rows(future, daily, selected, end):
             raise ValueError("future forecast contract failed")
         if selected in MODELS[:2]:
             offsets = (7,) if selected == "seasonal_naive" else (7, 14, 21, 28)
-            value = sum(daily[(row["target_date"] - timedelta(days=d), row["borough"])] for d in offsets) / len(offsets)
+            value = sum(daily[(row["target_date"] - timedelta(days=d), row["borough"], row.get("complaint_type", "ALL"))]
+                        for d in offsets) / len(offsets)
             if not math.isclose(row["predicted_count"], value, abs_tol=1e-9):
                 raise ValueError("future baseline differs from independent lookup")
 
@@ -81,7 +85,7 @@ def check_benchmark_coverage(bench, cfg):
         raise ValueError("benchmark trials, summaries or input scales are incomplete")
 
 
-def bounded_rows(frame, cap=20000):
+def bounded_rows(frame, cap=50000):
     rows = frame.limit(cap + 1).collect()
     if len(rows) > cap:
         raise ValueError("audit collection bound exceeded; aggregate or narrow the evaluation")
@@ -96,16 +100,28 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
         raise ValueError("configuration seed changed since training")
     if meta["producer_sha256"] != sha256_file(Path(__file__).parents[1] / "modeling/demand.py"):
         raise ValueError("demand producer changed since training; rerun the experiment")
+    if (meta["coverage"].get("category_policy") != category_policy(cfg)
+            or meta["coverage"].get("feature_producer_sha256") != meta["producer_sha256"]):
+        raise ValueError("feature producer or category policy differs from the audited experiment")
     if meta["coverage"]["source_manifest_sha256"] != sha256_file(root / cfg["source_manifest"]):
         raise ValueError("audit source hash mismatch")
-    daily = {(r["created_day"], r["borough"]): r["count_0"]
+    daily = {(r["created_day"], r["borough"], r.get("complaint_type", "ALL")): r["count_0"]
              for r in bounded_rows(spark.read.parquet(str(out / "daily")))}
+    support = {(r["borough"], r["complaint_type"]): r for r in meta["coverage"].get("category_support", [])}
+    for borough, category in {(b, c) for _, b, c in daily if c != "ALL"}:
+        counts = [n for (day, b, c), n in daily.items()
+                  if (b, c) == (borough, category) and str(day) <= cfg["train_end"]]
+        recorded = support.get((borough, category), {})
+        if (not recorded.get("eligible") or sum(counts) != recorded["training_count"]
+                or sum(n > 0 for n in counts) != recorded["nonzero_training_days"]):
+            raise ValueError("category support differs from training-only daily counts")
     predictions = bounded_rows(spark.read.parquet(str(out / "predictions")))
     cutoffs = {"validation": cfg["train_end"], "test": cfg["validation_end"]}
     ends = {"validation": cfg["validation_end"], "test": meta["coverage"]["end"]}
-    expected = {(model, split, origin, borough, h)
-                for split, cutoff in cutoffs.items() for origin, borough in daily
+    expected = {(model, split, origin, borough, category, h)
+                for split, cutoff in cutoffs.items() for origin, borough, category in daily
                 if date.fromisoformat(cutoff) <= origin <= date.fromisoformat(ends[split]) - timedelta(days=7)
+                and (origin - date.fromisoformat(cutoff)).days % cfg.get("origin_step_days", 1) == 0
                 for model in MODELS for h in range(1, 8)}
     check_prediction_rows(predictions, daily, expected)
     for row in predictions:
@@ -113,7 +129,8 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
                 or str(row["target_date"]) > ends[row["split"]]):
             raise ValueError("prediction splits differ from the requested chronological configuration")
     for table, dimensions in (("metrics", ["model", "split"]),
-                               ("metrics_borough", ["model", "split", "borough"]),
+                               ("metrics_borough", ["model", "split", "borough", "complaint_type"]),
+                               ("metrics_category", ["model", "split", "complaint_type"]),
                                ("metrics_horizon", ["model", "split", "horizon_days"]),
                                ("metrics_origins", ["model", "split", "forecast_origin"])):
         groups = defaultdict(list)
@@ -156,16 +173,23 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
             raise ValueError("retained Spark PipelineModel could not reproduce valid predictions")
         model_checks[name] = [type(stage).__name__ for stage in model.stages]
     handoff = bounded_rows(spark.read.parquet(str(out / "priority_features")))
-    if (len(handoff) != len({p["borough"] for p in future})
-            or {r["borough"] for r in handoff} != {p["borough"] for p in future}):
+    series = {(p["borough"], p["complaint_type"]) for p in future}
+    if (len(handoff) != len(series)
+            or {(r["borough"], r["complaint_type"]) for r in handoff} != series):
         raise ValueError("handoff borough coverage differs from forecast coverage")
     quality = json.loads((root / cfg["quality_report"]).read_text())
-    if sum(r["valid_geo_count"] for r in handoff) != quality["output_rows"] - quality["invalid_coords"]:
+    if sum(r["valid_geo_count"] for r in handoff if r["complaint_type"] == "ALL") != quality["output_rows"] - quality["invalid_coords"]:
         raise ValueError("handoff spatial counts do not reconcile with ETL")
     for row in handoff:
-        expected = sum(p["predicted_count"] for p in future if p["borough"] == row["borough"])
+        expected = sum(p["predicted_count"] for p in future
+                       if (p["borough"], p["complaint_type"]) == (row["borough"], row["complaint_type"]))
         if not math.isclose(row["forecast_7d"], expected, abs_tol=1e-8):
             raise ValueError("handoff and forecast totals differ")
+        trailing = sum(n for (day, b, c), n in daily.items()
+                       if (b, c) == (row["borough"], row["complaint_type"])
+                       and date.fromisoformat(meta["coverage"]["end"]) - timedelta(days=7) < day <= date.fromisoformat(meta["coverage"]["end"]))
+        if row["trailing_7d"] != trailing or not math.isclose(row["absolute_change"], expected - trailing, abs_tol=1e-8):
+            raise ValueError("handoff baseline/change differs from observed series counts")
     benchmark_path = root / benchmark_cfg["output_dir"] / "benchmark.json"
     bench = json.loads(benchmark_path.read_text())
     check_benchmark_coverage(bench, benchmark_cfg)
@@ -192,7 +216,7 @@ def audit_member1(spark, cfg, benchmark_cfg, root):
             raise ValueError("benchmark median mismatch")
     summary = {"predictions_checked": len(predictions), "future_rows": len(future),
                "handoff_rows": len(handoff), "retained_models_loaded": model_checks,
-               "metric_tables_reconciled": 4, "benchmark_trials_checked": len(bench["trials"]),
+               "metric_tables_reconciled": 5, "benchmark_trials_checked": len(bench["trials"]),
                "selected_model": meta["selected_model"], "status": "PASS"}
     save_json(out / "final_audit.json", summary)
     return summary

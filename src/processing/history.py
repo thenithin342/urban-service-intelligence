@@ -58,7 +58,7 @@ def process_history(config: dict, root: Path, spark) -> dict:
                               for value in (F.lit(day), F.lit(snapshot))])
     frame = frame.withColumn("data_snapshot_date", F.to_date(
         F.element_at(snapshots, F.col("created_day").cast("string"))))
-    output = root / "data/processed/member1_history"
+    output = root / config.get("etl_output", "data/processed/member1_history")
     output.parent.mkdir(parents=True, exist_ok=True)
     if not output.resolve().is_relative_to(root.resolve()):
         raise ValueError("historical output must stay inside the project root")
@@ -90,7 +90,7 @@ def process_history(config: dict, root: Path, spark) -> dict:
         missing_days=[], output_path=str(output), spark_version=spark.version,
         snapshot_semantics="UTC acquisition date per daily checkpoint, not event date",
     )
-    report = root / "artifacts/member1/phase4/etl_quality.json"
+    report = root / config.get("etl_quality_report", "artifacts/member1/phase4/etl_quality.json")
     report.parent.mkdir(parents=True, exist_ok=True)
     save_json(report, metrics)
     return metrics

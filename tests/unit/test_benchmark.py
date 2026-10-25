@@ -5,8 +5,16 @@ import json
 
 import pytest
 
-from src.evaluation.benchmark import prepare_inputs, read_counts
+from src.evaluation.benchmark import benchmark_speedups, prepare_inputs, read_counts
 from src.ingestion.downloader import DEFAULT_FIELDS, sha256_file
+
+
+def test_speedup_ratio_direction():
+    report = {"summary": [{"engine": e, "rows": n, "partitions": p, "median_seconds": seconds}
+                           for e, n, p, seconds in (("pandas", 10, 0, 1), ("spark", 10, 2, 2),
+                                                    ("pandas", 20, 0, 4), ("spark", 20, 2, 2))]}
+    assert benchmark_speedups(report) == [{"rows": 10, "pandas_seconds_over_spark_seconds": 0.5},
+                                         {"rows": 20, "pandas_seconds_over_spark_seconds": 2.0}]
 
 
 def test_missing_benchmark_part_files_are_not_empty_results(tmp_path):

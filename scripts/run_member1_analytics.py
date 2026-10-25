@@ -295,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
             "input_path": str(input_path),
             "ingestion_manifest_path": str(manifest_path) if ingestion_meta else None,
             "ingestion_manifest_sha256": manifest_hash,
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "spark_version": spark.version,
             "verify": verify,
             "coverage": coverage,

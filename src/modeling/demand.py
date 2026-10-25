@@ -1,4 +1,4 @@
-"""Retrospective borough demand experiments with purged chronological evaluation."""
+"""Retrospective borough/category demand with chronological evaluation."""
 
 from __future__ import annotations
 
@@ -30,6 +30,18 @@ BOROUGHS = ["BRONX", "BROOKLYN", "MANHATTAN", "QUEENS", "STATEN ISLAND", "UNKNOW
 NUMERIC = ["count_0", "lag_1", "lag_7", "lag_14", "lag_28", "mean_7", "mean_28",
            "seasonal_naive", "weekday_mean", "horizon_days", "weekday_sin", "weekday_cos"]
 MODELS = ["seasonal_naive", "weekday_mean", "lr_scaled", "lr_unscaled", "random_forest", "gbt"]
+SERIES = ["borough", "complaint_type"]
+
+
+def category_policy(cfg):
+    return {"selection_cutoff": cfg["train_end"], "top_n": cfg.get("category_top_n", 0),
+            "min_train_count": cfg.get("category_min_train_count", 100),
+            "min_nonzero_days": cfg.get("category_min_nonzero_days", 28)}
+
+
+def with_category(frame):
+    """Retain compatibility with the original borough-total fixture/artifact schema."""
+    return frame if "complaint_type" in frame.columns else frame.withColumn("complaint_type", F.lit("ALL"))
 
 
 def load_demand_config(path):
@@ -44,7 +56,30 @@ def load_demand_config(path):
     cfg.update(train_end=train.isoformat(), validation_end=validation.isoformat(), seed=int(cfg["seed"]))
     if train >= validation or cfg["seed"] < 0:
         raise ValueError("ordered train/validation dates and nonnegative seed required")
+    for key, default in (("category_top_n", 0), ("category_min_train_count", 100),
+                         ("category_min_nonzero_days", 28), ("origin_step_days", 1)):
+        cfg[key] = int(cfg.get(key, default))
+    if (not 0 <= cfg["category_top_n"] <= 10 or min(cfg["category_min_train_count"],
+            cfg["category_min_nonzero_days"], cfg["origin_step_days"]) < 1):
+        raise ValueError("category_top_n must be 0..10; support thresholds and origin step must be positive")
     return cfg
+
+
+def category_series(raw, cfg):
+    """Freeze category/borough eligibility using training observations only."""
+    train = raw.filter(F.col("created_day") <= F.lit(cfg["train_end"]).cast("date"))
+    top = (train.filter(~F.col("complaint_type").isin("ALL", "UNKNOWN"))
+           .groupBy("complaint_type").count().orderBy(F.desc("count"), "complaint_type")
+           .limit(cfg.get("category_top_n", 0)).select("complaint_type"))
+    support = (train.join(top, "complaint_type").groupBy(*SERIES)
+               .agg(F.count("created_day").alias("training_count"),
+                    F.countDistinct("created_day").alias("nonzero_training_days"))
+               .withColumn("eligible", (F.col("training_count") >= cfg.get("category_min_train_count", 100))
+                           & (F.col("nonzero_training_days") >= cfg.get("category_min_nonzero_days", 28))))
+    evidence = [r.asDict() for r in support.orderBy(*SERIES).collect()]
+    if cfg.get("category_top_n", 0) and not any(r["eligible"] for r in evidence):
+        raise ValueError("no category/borough series meets training-only support thresholds")
+    return support.filter("eligible").select(*SERIES), evidence
 
 
 def verified_daily(spark, cfg, root):
@@ -67,24 +102,32 @@ def verified_daily(spark, cfg, root):
             or sum(observed.values()) != quality["output_rows"]
             or raw.select("unique_key").distinct().count() != quality["output_rows"]):
         raise ValueError("cleaned counts/keys do not reconcile with the verified source")
-    daily = raw.select("created_day", F.coalesce("borough", F.lit("UNKNOWN")).alias("borough"))
+    daily = raw.select("created_day", F.coalesce("borough", F.lit("UNKNOWN")).alias("borough"), "complaint_type")
     if daily.filter(~F.col("borough").isin(BOROUGHS)).limit(1).count():
         raise ValueError("unexpected borough; update the documented geography contract first")
-    counts = daily.groupBy("created_day", "borough").count()
+    counts = daily.groupBy("created_day", "borough").count().withColumn("complaint_type", F.lit("ALL"))
     calendar = spark.sql(
         f"SELECT explode(sequence(DATE '{days[0]}', DATE '{days[-1]}', INTERVAL 1 DAY)) created_day"
     )
     boroughs = spark.sql("SELECT explode(array(" + ",".join(f"'{b}'" for b in BOROUGHS) + ")) borough")
-    dense = (calendar.crossJoin(boroughs).join(counts, ["created_day", "borough"], "left")
+    eligible, support = category_series(daily, cfg)
+    series = boroughs.withColumn("complaint_type", F.lit("ALL")).unionByName(eligible)
+    category_counts = daily.join(eligible, SERIES).groupBy("created_day", *SERIES).count()
+    counts = counts.unionByName(category_counts)
+    dense = (calendar.crossJoin(series).join(counts, ["created_day", *SERIES], "left")
              .fillna(0, subset=["count"]).withColumnRenamed("count", "count_0"))
     return dense, {"start": days[0], "end": days[-1], "days": len(days),
                    "source_manifest_sha256": manifest_hash, "rows": quality["output_rows"],
-                   "snapshot_dates": quality["snapshot_dates"]}
+                   "snapshot_dates": quality["snapshot_dates"], "category_support": support,
+                   "category_policy": category_policy(cfg),
+                   "category_selection_cutoff": cfg["train_end"],
+                   "series": [r.asDict() for r in series.orderBy(*SERIES).collect()]}
 
 
 def build_features(daily):
     """An origin is the end of its NYC wall-calendar day; all features stop there."""
-    order = Window.partitionBy("borough").orderBy("created_day")
+    daily = with_category(daily)
+    order = Window.partitionBy(*SERIES).orderBy("created_day")
     base = daily
     for lag in range(1, WARMUP + 1):
         base = base.withColumn(f"lag_{lag}", F.lag("count_0", lag).over(order))
@@ -94,16 +137,22 @@ def build_features(daily):
     horizons = daily.sparkSession.range(1, HORIZON + 1).select(F.col("id").cast("int").alias("horizon_days"))
     frame = base.crossJoin(horizons).withColumn("target_date", F.expr("date_add(forecast_origin, horizon_days)"))
     history = F.array("count_0", *[f"lag_{lag}" for lag in range(1, 29)])
-    frame = frame.withColumn("seasonal_naive", F.element_at(history, 8 - F.col("horizon_days")))
-    weekday_values = [F.element_at(history, offset - F.col("horizon_days")) for offset in (8, 15, 22, 29)]
+    # PySpark 4.x requires element_at index to be INT, not BIGINT. Cast explicitly
+    # because arithmetic between a Python int literal and a Column can widen to BIGINT.
+    frame = frame.withColumn(
+        "seasonal_naive", F.element_at(history, (F.lit(8) - F.col("horizon_days")).cast("int"))
+    )
+    weekday_values = [
+        F.element_at(history, (F.lit(offset) - F.col("horizon_days")).cast("int"))
+        for offset in (8, 15, 22, 29)
+    ]
     frame = frame.withColumn("weekday_mean", reduce(lambda a, b: a + b, weekday_values) / 4.0)
     angle = (F.dayofweek("target_date") - 1) * (2.0 * math.pi / 7.0)
     frame = frame.withColumn("weekday_sin", F.sin(angle)).withColumn("weekday_cos", F.cos(angle))
-    labels = daily.select(F.col("created_day").alias("target_date"), "borough",
+    labels = daily.select(F.col("created_day").alias("target_date"), *SERIES,
                           F.col("count_0").alias("actual_count"))
-    return (frame.join(labels, ["target_date", "borough"], "left")
-            .select("forecast_origin", "target_date", "borough", "actual_count", *NUMERIC)
-            .withColumn("complaint_type", F.lit("ALL")))
+    return (frame.join(labels, ["target_date", *SERIES], "left")
+            .select("forecast_origin", "target_date", *SERIES, "actual_count", *NUMERIC))
 
 
 def training_rows(features, cutoff):
@@ -111,17 +160,20 @@ def training_rows(features, cutoff):
                            & F.col("actual_count").isNotNull())
 
 
-def evaluation_rows(features, cutoff, end):
+def evaluation_rows(features, cutoff, end, step=1):
     """Every forecast origin is at or after its model's last training label."""
     last_origin = (date.fromisoformat(end) - timedelta(days=HORIZON)).isoformat()
     return features.filter((F.col("forecast_origin") >= F.lit(cutoff).cast("date"))
-                           & (F.col("forecast_origin") <= F.lit(last_origin).cast("date")))
+                           & (F.col("forecast_origin") <= F.lit(last_origin).cast("date"))
+                           & (F.datediff("forecast_origin", F.lit(cutoff).cast("date")) % step == 0))
 
 
 def pipeline(name, seed):
     stages = [StringIndexer(inputCol="borough", outputCol="borough_id", handleInvalid="keep"),
               OneHotEncoder(inputCol="borough_id", outputCol="borough_vector", handleInvalid="keep"),
-              VectorAssembler(inputCols=NUMERIC + ["borough_vector"], outputCol="assembled")]
+              StringIndexer(inputCol="complaint_type", outputCol="category_id", handleInvalid="keep"),
+              OneHotEncoder(inputCol="category_id", outputCol="category_vector", handleInvalid="keep"),
+              VectorAssembler(inputCols=[*NUMERIC, "borough_vector", "category_vector"], outputCol="assembled")]
     feature_col = "assembled"
     if name == "lr_scaled":
         stages.append(StandardScaler(inputCol="assembled", outputCol="features", withMean=False, withStd=True))
@@ -136,7 +188,7 @@ def pipeline(name, seed):
         estimator = GBTRegressor(**common, maxIter=30, maxDepth=3, seed=seed)
     else:
         raise ValueError(f"unknown MLlib model: {name}")
-    return Pipeline(stages=stages + [estimator])
+    return Pipeline(stages=[*stages, estimator])
 
 
 def predict(frame, name, model, cutoff, split):
@@ -148,7 +200,7 @@ def predict(frame, name, model, cutoff, split):
     return (result.withColumn("predicted_count", F.greatest(F.lit(0.0), "raw_prediction"))
             .withColumn("model", F.lit(name)).withColumn("split", F.lit(split))
             .withColumn("fit_cutoff", F.lit(cutoff).cast("date"))
-            .withColumn("model_version", F.lit(f"demand-v1-{name}-{cutoff}"))
+            .withColumn("model_version", F.lit(f"demand-v2-{name}-{cutoff}"))
             .select("forecast_origin", "target_date", "borough", "complaint_type", "horizon_days",
                     "actual_count", "predicted_count", "raw_prediction", "model", "model_version", "fit_cutoff", "split"))
 
@@ -169,8 +221,9 @@ def write_features(spark, cfg, root):
     features = build_features(spark.read.parquet(str(out / "daily")))
     features.write.mode("overwrite").parquet(str(out / "features"))
     coverage.update(numeric_features=NUMERIC, horizon_days=HORIZON, warmup_days=WARMUP,
+                    feature_producer_sha256=sha256_file(Path(__file__)),
                     snapshot_semantics="acquisition dates, not forecast origins",
-                    feature_source="created_day and borough counts only")
+                    feature_source="created_day and borough/category counts only")
     save_json(out / "feature_manifest.json", coverage)
     return coverage
 
@@ -180,6 +233,10 @@ def train_and_forecast(spark, cfg, root):
     coverage = json.loads((out / "feature_manifest.json").read_text())
     if coverage["source_manifest_sha256"] != sha256_file(root / cfg["source_manifest"]):
         raise ValueError("source provenance changed; rebuild features")
+    if coverage.get("category_policy") != category_policy(cfg):
+        raise ValueError("category policy or selection cutoff changed; rebuild features before training")
+    if coverage.get("feature_producer_sha256") != sha256_file(Path(__file__)):
+        raise ValueError("feature producer changed; rebuild features before training")
     if not coverage["start"] < cfg["train_end"] < cfg["validation_end"] < coverage["end"]:
         raise ValueError("split dates must be inside the observed window")
     features = spark.read.parquet(str(out / "features"))
@@ -188,7 +245,7 @@ def train_and_forecast(spark, cfg, root):
     for split, cutoff, end in (("validation", cfg["train_end"], cfg["validation_end"]),
                                 ("test", cfg["validation_end"], coverage["end"])):
         train = training_rows(features, cutoff).withColumn("label", F.col("actual_count").cast("double")).cache()
-        evaluate = evaluation_rows(features, cutoff, end).cache()
+        evaluate = evaluation_rows(features, cutoff, end, cfg.get("origin_step_days", 1)).cache()
         if train.count() < 100 or evaluate.count() == 0:
             raise ValueError("insufficient chronological training/evaluation rows")
         for name in MODELS:
@@ -211,7 +268,8 @@ def train_and_forecast(spark, cfg, root):
         raise ValueError("training labels extend beyond a forecast origin")
     heldout.write.mode("overwrite").parquet(str(out / "predictions"))
     heldout = spark.read.parquet(str(out / "predictions"))
-    for name, groups in (("metrics", ["model", "split"]), ("metrics_borough", ["model", "split", "borough"]),
+    for name, groups in (("metrics", ["model", "split"]), ("metrics_borough", ["model", "split", *SERIES]),
+                          ("metrics_category", ["model", "split", "complaint_type"]),
                           ("metrics_horizon", ["model", "split", "horizon_days"]),
                           ("metrics_origins", ["model", "split", "forecast_origin"])):
         error_metrics(heldout, groups).write.mode("overwrite").parquet(str(out / name))
@@ -232,9 +290,10 @@ def train_and_forecast(spark, cfg, root):
                "selection_rule": "lowest validation MAE; test scores never select the model",
                "validation_scores": validation_scores, "fits": metadata,
                "seed": cfg["seed"], "producer_sha256": sha256_file(Path(__file__)),
+               "origin_step_days": cfg.get("origin_step_days", 1),
                "final_fit_cutoff": coverage["end"], "final_training_rows": final_training_rows,
                "retained_models": {name: str(out / "models" / name) for name in final_models},
                "overall_metrics": [r.asDict() for r in error_metrics(heldout, ["model", "split"]).collect()],
-               "limitations": "Retrospective winter-only experiment; assumes counts available at each day end; no annual accuracy claim."}
+               "limitations": "Retrospective counts assumed available at day end; selected categories overlap ALL totals; pooled errors are not a citywide unique-complaint metric; one study cannot establish repeat-year accuracy."}
     save_json(out / "model_manifest.json", summary)
     return summary

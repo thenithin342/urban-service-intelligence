@@ -113,7 +113,7 @@ def run_benchmark(spark, cfg, root):
             for engine in ("pandas", "spark"):
                 settings = [base_partitions] if engine == "spark" else [0]
                 if engine == "spark" and n == max(inputs):
-                    settings = sorted(set(partitions + [base_partitions]))
+                    settings = sorted({*partitions, base_partitions})
                 for p in settings:
                     if p:
                         spark.conf.set("spark.sql.shuffle.partitions", str(p))
@@ -160,6 +160,13 @@ def run_benchmark(spark, cfg, root):
         spark.conf.set("spark.sql.shuffle.partitions", old_shuffle)
 
 
+def benchmark_speedups(report):
+    """Ratio above one means Spark is faster; below one means Pandas is faster."""
+    medians = {(r["engine"], r["rows"], r["partitions"]): r["median_seconds"] for r in report["summary"]}
+    return [{"rows": n, "pandas_seconds_over_spark_seconds": medians[("pandas", n, 0)] / medians[("spark", n, 2)]}
+            for n in sorted({r["rows"] for r in report["summary"]})]
+
+
 def plot_benchmark(report, out):
     import matplotlib
     matplotlib.use("Agg")
@@ -186,4 +193,15 @@ def plot_benchmark(report, out):
     ax.set_title(f"{largest:,} records, {period['start']}..{period['end']}: partition sensitivity")
     fig.tight_layout()
     fig.savefig(out / "partition_sensitivity.png", dpi=160)
+    plt.close(fig)
+    ratios = benchmark_speedups(report)
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.plot([r["rows"] for r in ratios], [r["pandas_seconds_over_spark_seconds"] for r in ratios], marker="o")
+    ax.axhline(1.0, color="gray", linestyle="--", label="Equal median runtime")
+    ax.set_xlabel("Real input records")
+    ax.set_ylabel("Pandas median / Spark median (2 partitions)")
+    ax.set_title(f"{period['start']}..{period['end']}: >1 Spark faster; <1 Spark slower")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out / "speedup_by_scale.png", dpi=160)
     plt.close(fig)

@@ -8,7 +8,17 @@ import yaml
 
 from src.ingestion.downloader import sha256_file
 from src.ingestion.history import daily_windows
-from src.modeling.demand import load_demand_config, verified_daily
+from src.modeling.demand import category_policy, load_demand_config, train_and_forecast, verified_daily
+
+
+def test_training_rejects_changed_category_selection_cutoff(tmp_path):
+    source = tmp_path / "source.json"
+    source.write_text("{}")
+    cfg = {"output_dir": ".", "source_manifest": source.name, "train_end": "2024-01-31", "category_top_n": 3}
+    old = category_policy({**cfg, "train_end": "2024-02-14"})
+    (tmp_path / "feature_manifest.json").write_text(json.dumps({"source_manifest_sha256": sha256_file(source), "category_policy": old}))
+    with pytest.raises(ValueError, match="selection cutoff changed"):
+        train_and_forecast(None, cfg, tmp_path)
 
 
 def test_demand_accepts_yaml_dates_and_normalizes_seed(tmp_path):
@@ -37,5 +47,5 @@ def test_incomplete_or_missing_day_never_becomes_zero(tmp_path, complete):
     path.write_text(json.dumps({"complete": complete, "start": "2023-12-01", "end": "2024-03-01", "days": days[:-1]}))
     quality = tmp_path / "quality.json"
     quality.write_text(json.dumps({"source_manifest_sha256": sha256_file(path)}))
-    with pytest.raises(ValueError, match="complete|consecutive"):
+    with pytest.raises(ValueError, match=r"complete|consecutive"):
         verified_daily(None, {"source_manifest": "manifest.json", "quality_report": "quality.json"}, tmp_path)

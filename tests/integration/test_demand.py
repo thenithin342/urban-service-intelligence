@@ -8,6 +8,7 @@ from pyspark.sql import functions as F
 from src.modeling.demand import (
     NUMERIC,
     build_features,
+    category_series,
     error_metrics,
     evaluation_rows,
     pipeline,
@@ -57,3 +58,33 @@ def test_zero_actual_wape_is_null_and_models_are_mllib(spark):
     invalid = spark.createDataFrame([(float("nan"),), (None,)], "seasonal_naive double")
     with pytest.raises(ValueError, match="nonfinite"):
         predict(invalid, "seasonal_naive", None, "2024-01-01", "future")
+
+
+def test_category_support_ignores_future_popularity_and_sparse_boroughs(spark):
+    start = date(2024, 1, 1)
+    rows = [(start + timedelta(days=i), "QUEENS", "A") for i in range(31)]
+    rows += [(start, "BRONX", "A")]
+    rows += [(date(2024, 2, 1), "BRONX", "FUTURE") for _ in range(100)]
+    raw = spark.createDataFrame(rows, "created_day date, borough string, complaint_type string")
+    eligible, evidence = category_series(raw, {"train_end": "2024-01-31", "category_top_n": 1,
+                                              "category_min_train_count": 10, "category_min_nonzero_days": 10})
+    assert [(r["borough"], r["complaint_type"]) for r in eligible.collect()] == [("QUEENS", "A")]
+    assert {r["complaint_type"] for r in evidence} == {"A"}
+    assert next(r for r in evidence if r["borough"] == "BRONX")["eligible"] is False
+
+
+def test_category_lags_labels_and_weekly_origins_do_not_mix(spark):
+    start = date(2024, 1, 1)
+    raw = spark.createDataFrame([(start + timedelta(days=i), "QUEENS", c, i + offset)
+                                 for c, offset in (("A", 0), ("B", 1000)) for i in range(70)],
+                                "created_day date, borough string, complaint_type string, count_0 bigint")
+    frame = build_features(raw).localCheckpoint(eager=True)
+    rows = frame.filter(F.col("forecast_origin") == F.lit(start + timedelta(days=35))).collect()
+    assert len(rows) == 14
+    for row in rows:
+        offset = 1000 if row["complaint_type"] == "B" else 0
+        assert row["lag_28"] == 7 + offset
+        assert row["actual_count"] == 35 + row["horizon_days"] + offset
+        assert row["seasonal_naive"] == 35 + row["horizon_days"] - 7 + offset
+    origins = evaluation_rows(frame, "2024-02-10", "2024-03-01", 7).select("forecast_origin").distinct().collect()
+    assert origins and all((r[0] - date(2024, 2, 10)).days % 7 == 0 for r in origins)

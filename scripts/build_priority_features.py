@@ -26,15 +26,17 @@ def main():
     coverage = model_meta["coverage"]
     if coverage["source_manifest_sha256"] != sha256_file(ROOT / cfg["source_manifest"]):
         raise ValueError("source provenance changed since training")
+    if model_meta["producer_sha256"] != sha256_file(ROOT / "src/modeling/demand.py"):
+        raise ValueError("demand producer changed; rebuild features and train before exporting handoff")
     spark = get_spark("member1-priority-handoff")
     try:
         result = build_handoff(spark.read.parquet(str(out / "daily")), spark.read.parquet(str(out / "future")),
                                spark.read.parquet(str(ROOT / cfg["input_parquet"])), coverage)
         result.write.mode("overwrite").parquet(str(out / "priority_features"))
-        rows = result.orderBy("borough").toJSON().collect()
+        rows = result.orderBy("borough", "complaint_type").toJSON().collect()
         save_json(out / "handoff_manifest.json", {"rows": len(rows), "source_manifest_sha256": coverage["source_manifest_sha256"],
-                  "schema": result.schema.jsonValue(), "scope": "borough ALL counts; no priority weights or ranks"})
-        write_plots(spark, out)
+                  "schema": result.schema.jsonValue(), "scope": "borough totals plus eligible categories; categories overlap ALL; no priority weights or ranks"})
+        write_plots(spark, out, json.loads((ROOT / cfg["quality_report"]).read_text()))
         print("\n".join(rows))
     finally:
         spark.stop()

@@ -59,3 +59,19 @@ def test_benchmark_engines_match_on_quoted_missing_invalid_fields(spark, tmp_pat
     actual = read_counts(tmp_path / "spark")
     assert actual == read_counts(tmp_path / "pandas.csv")
     assert sum(actual.values()) == 3 and actual[("UNKNOWN", "UNKNOWN")] == 1
+
+
+def test_category_handoff_keeps_totals_and_slices_separate(spark):
+    end = date(2024, 1, 7)
+    daily = spark.createDataFrame([(end - timedelta(days=i), "QUEENS", c, n)
+                                   for c, n in (("ALL", 10), ("A", 5)) for i in range(7)],
+                                  "created_day date, borough string, complaint_type string, count_0 bigint")
+    raw = spark.createDataFrame([(end, "QUEENS", c, 40.745, -73.945) for c in ("A", "B") for _ in range(35)],
+                                "created_day date, borough string, complaint_type string, latitude double, longitude double")
+    future = spark.createDataFrame([(end, end + timedelta(days=h), "QUEENS", c, h, None, p, "v2")
+                                    for c, p in (("ALL", 12.0), ("A", 6.0)) for h in range(1, 8)],
+                                   "forecast_origin date, target_date date, borough string, complaint_type string, horizon_days int, actual_count bigint, predicted_count double, model_version string")
+    rows = {r["complaint_type"]: r for r in build_handoff(daily, future, raw, {"start": "2024-01-01", "end": str(end)}).collect()}
+    assert rows["ALL"]["valid_geo_count"] == 70 and rows["A"]["valid_geo_count"] == 35
+    assert rows["ALL"]["forecast_7d"] == 84 and rows["A"]["forecast_7d"] == 42
+    assert rows["A"]["trailing_7d"] == 35 and rows["A"]["percent_change"] == 20

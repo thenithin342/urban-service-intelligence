@@ -6,6 +6,15 @@ end 2024-03-01). This replaces neither the sample nor its analytics outputs.
 To expand toward 2022-2025, choose another output directory and explicit bounds.
 Three winter months cannot establish annual seasonality.
 
+`configs/history_multiseason.yaml` defines an additional complete annual-cycle
+window, 2023-12-01 through exclusive 2024-12-01, bounded to 5 million rows and
+2.5 billion CSV bytes. Its raw checkpoints, processed Parquet and quality report
+use separate directories, preserving the original study. The source count probe
+is evidence of requested size; only a complete reconciled acquisition manifest
+and ETL report establish acquired coverage. Existing verified daily checkpoints
+may be copied and independently revalidated against the new request's counts.
+The optional `etl_output` and `etl_quality_report` paths isolate study outputs.
+
 ## Acquisition
 
 `scripts/download_history.py` uses `src/ingestion/history.py`. All dates are
@@ -46,6 +55,10 @@ sequentially. Invalid UTC acquisition timestamps and inconsistent source/date or
 monthly metadata fail before Spark transformations. CSV parsing supports quoted
 newlines and the doubled quotes emitted by the download writer.
 Only one ETL writer may publish to a given output directory at a time.
+Atomic JSON publication retries short permission-denied locks with bounded
+backoff (six attempts, at most 3.1 seconds of waiting). Persistent denial still
+raises and preserves the previous published JSON. This does not permit concurrent
+writers; it handles brief Windows reader/synchronization locks.
 
 `data_snapshot_date` is the UTC acquisition date for each daily checkpoint,
 not the complaint event date or the ETL run date. It describes current observed

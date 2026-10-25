@@ -1,8 +1,21 @@
 # Member 1 demand and prioritization feature contract
 
 These are additive artifacts under `artifacts/member1/demand/`. Existing analytics
-schemas and teammate-owned modules stay intact. Scope is daily totals by the five
-boroughs plus UNKNOWN; complaint_type=ALL means a total, not a trained category model.
+schemas and teammate-owned modules stay intact. Version 2 retains daily totals by
+the five boroughs plus UNKNOWN and adds supported borough/category series.
+complaint_type=ALL means a total; named categories are modeled separately and
+overlap those totals. Never sum ALL and category rows into a citywide population.
+
+`configs/demand.yaml` retains the original totals-only study.
+`configs/demand_categories.yaml` runs category comparisons on the verified winter
+window. `configs/demand_multiseason.yaml` uses separate full-year history and output
+paths. Category selection is frozen before validation: choose the top three citywide
+training categories by count (name breaks ties), then retain borough/category pairs
+with at least 100 training complaints on at least 28 distinct nonzero days. Sparse
+pairs are omitted, not assigned fabricated forecasts; the manifest saves eligibility
+and measured support. This policy describes reporting volume, not service importance.
+The support thresholds screen out empty/one-off series; they are not a statistical
+power guarantee. Per-series errors remain necessary for judging small groups.
 
 ## Time and features
 
@@ -19,6 +32,16 @@ day is zero; an unverified/missing day is an error. This retrospective experimen
 assumes complete daily counts were available at day end. A later acquisition cannot
 prove that availability or exclude backfills. Three winter months cannot establish
 annual forecasting accuracy.
+
+The multi-season configuration requests December 2023 through November 2024, with
+training labels through June 30, validation through August 31 and test through
+November 30. Seven-day origins limit overlapping evaluation and bounded audit
+memory. The original winter configurations retain daily origins. One annual cycle
+does not establish repeat-year accuracy or historical point-in-time data availability.
+Weekly origins are anchored at each block's fit cutoff; an incomplete final week
+is not scored. The validation block may therefore end before its allowed upper bound.
+Changing the category selection cutoff/policy or feature producer rejects cached
+features and requires rebuilding them before training or exporting a handoff.
 
 ## Evaluation
 
@@ -38,7 +61,8 @@ Overlapping horizon errors are correlated; no confidence/significance claim is m
 
 ## Artifacts
 
-- daily/: created_day date, borough string, count_0 bigint; one verified day/borough.
+- daily/: created_day date, borough string, complaint_type string, count_0 bigint;
+  one verified day/eligible series, including ALL totals.
 - features/: origin/target dates, borough, ALL category, horizon int, nullable actual
   count, count/lag/trailing/calendar/baseline numeric features.
 - predictions/: forecast_origin date, target_date date, borough string,
@@ -47,8 +71,11 @@ Overlapping horizon errors are correlated; no confidence/significance claim is m
   split string. Grain: model/split/origin/borough/horizon.
 - future/: same schema for the selected model at the last observed origin;
   actual_count=null, split=future. These are historical-origin forecasts, not today.
-- metrics/, metrics_borough/, metrics_horizon/, metrics_origins/: MAE, RMSE, WAPE
-  overall, by borough, horizon and rolling origin.
+- metrics/, metrics_borough/, metrics_category/, metrics_horizon/, metrics_origins/:
+  MAE, RMSE, WAPE pooled overall, by borough/category pair, category, horizon and
+  rolling origin. Pooled rows overlap ALL/category populations; use category/series
+  tables for comparisons at one grain. The shared model is selected by pooled
+  validation MAE; test data never selects categories, preprocessing or the model.
 - models/: final retained Spark PipelineModel artifacts, ignored by Git.
 - feature_manifest.json and model_manifest.json: source hash, coverage, feature
   schema, cutoffs, selection rule, measured fit times, seeds and producer hash.
@@ -58,11 +85,11 @@ real borough, and ALL is not a category. Priority weights/ranks remain Member 3'
 
 ## Phase 6 borough handoff
 
-`priority_features/` has one row per borough/origin/model version: forecast_7d
+`priority_features/` has one row per borough/category/origin/model version: forecast_7d
 (sum of seven predicted counts), trailing_7d (observed prior seven days),
 absolute_change, percent_change (null for zero baseline), baseline_zero,
 valid_geo_count, active_grid_cells, complaints_per_active_cell, spatial_period_start,
-spatial_period_end, source_snapshot_max, complaint_type=ALL, horizon_days=7 and
+spatial_period_end, source_snapshot_max, complaint_type, horizon_days=7 and
 uncertainty_method=not_calibrated. Counts per active cell are descriptive intensity,
 not per-capita rates. A cell crossing source borough assignments can appear in
 multiple boroughs; active-cell counts must not be summed as globally unique cells.
@@ -71,3 +98,8 @@ Missing snapshot metadata stays null and is never replaced by an event date.
 All spatial observations stop at the historical forecast origin. The handoff
 rejects population/geography mismatches, missing horizons, observed future labels
 and nonfinite predictions. It supplies no staffing weights, ranks or risk scores.
+Spatial counts for a named category use only that category's complaints in its
+eligible borough. ALL rows reconcile with the complete source population;
+category rows must not be added to ALL when reconciling source or spatial totals.
+Forecasts are estimated per series and are not hierarchically reconciled; a
+consumer must choose one grain rather than assume category predictions add to ALL.
