@@ -100,6 +100,10 @@ Metadata and metrics are emitted as machine-readable JSON:
   | `date` | `date` | No | Calendar date (`YYYY-MM-DD`) |
   | `complaint_count` | `bigint` | No | Total complaints logged on date |
 
+> [!NOTE]
+> **Heuristic Completeness Disclosure:**
+> In daily coverage tracking, a calendar day is heuristically classified as complete if observed records span from hour 0 through hour 23 (`min_hour == 0 and max_hour == 23`). This diurnal boundary check is an observational proxy, not formal proof of complete API ingestion without ingestion log and manifest verification. Historical expansion beyond the current sample window is deferred to subsequent phases.
+
 ### 3.7. `complaints_daily_borough`
 - **Path:** `artifacts/member1/analytics/tables/complaints_daily_borough`
 - **Grain:** One row per date x borough combination.
@@ -235,6 +239,10 @@ Metadata and metrics are emitted as machine-readable JSON:
   | `dominant_borough` | `string` | Yes | Dominant borough across constituent cells (grid cell plurality) |
   | `dominant_complaint` | `string` | Yes | Dominant complaint category across constituent cells (grid cell plurality) |
 
+> [!IMPORTANT]
+> **Cluster ID Stability Notice for Downstream Consumers (Member 3):**
+> Unsupervised KMeans cluster integer labels (`cluster: 0, 1`) are assigned dynamically by PySpark MLlib during centroid optimization. **Cluster IDs are not guaranteed to retain the exact same semantic identity (e.g. Core vs Periphery) across retraining runs, differing random seeds, or expanded historical data windows.** Member 3 dashboards and downstream modeling components must join on `spatial_id` or query `cluster_summary` attributes (such as `mean_complaints_per_cell`, `cells`, or centroid coordinates) to interpret cluster characteristics dynamically, rather than hardcoding business logic to `cluster == 0`. The schemas of `spatial_grid_cells` (including `cluster: bigint`) and `cluster_summary` remain fully backwards compatible with Member 3 requirements.
+
 ---
 
 ## 4. Figures and Interactive Visualizations
@@ -250,7 +258,7 @@ Member 3 can embed these visual artifacts directly in Streamlit tabs or markdown
 | `hour_weekday_heatmap` | `figures/hour_weekday_heatmap.png` | PNG | Peak cell is Wednesday 11:00 (721.5 avg records/h, normalized for observed weekday count). |
 | `daily_kde` | `figures/daily_kde.png` | PNG | Volume distribution smoothed around mode of ~9,524 complaints/day. |
 | `daily_violin` | `figures/daily_violin.png` | PNG | Displays intra-borough variance in daily volume. |
-| `resolution_hist` | `figures/resolution_hist.png` | PNG | Heavily right-skewed; median resolution is 15.6 h (p90 698.3 h, p99 6913.0 h); unresolved rows excluded. |
+| `resolution_hist` | `figures/resolution_hist.png` | PNG | Heavily right-skewed; median resolution is 15.6 h (p90 699.3 h, p99 6973.4 h); unresolved rows excluded. |
 | `resolution_box` | `figures/resolution_box.png` | PNG | Median resolution is highest in UNKNOWN (191.7 h) among boroughs; box plots use resolved rows only and hide outliers. |
 | `borough_radar` | `figures/borough_radar.png` | PNG | Normalised category composition profile by borough. |
 | `kmeans_silhouette` | `figures/kmeans_silhouette.png` | PNG | Silhouette curve across k=2..8; highest at k=2 (0.599). |

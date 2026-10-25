@@ -365,3 +365,32 @@ def test_dominant_deterministic_with_shuffled_partitions(spark):
         assert dom_c[0] == "BROOKLYN"
         assert dom_c[1] == "STATEN ISLAND"
 
+
+def test_dominant_normalizes_null_and_unknown_before_groupby(spark):
+    # Regression test: verify null and 'UNKNOWN' are merged before grouping.
+    # cell_1 has 2 None, 2 'UNKNOWN', and 3 'Noise'.
+    # If un-normalized: Noise (3) would beat None (2) and UNKNOWN (2).
+    # When normalized before groupBy: UNKNOWN has 2 + 2 = 4 > Noise (3), so UNKNOWN wins.
+    data = [
+        ("cell_1", None),
+        ("cell_1", None),
+        ("cell_1", "UNKNOWN"),
+        ("cell_1", "UNKNOWN"),
+        ("cell_1", "Noise"),
+        ("cell_1", "Noise"),
+        ("cell_1", "Noise"),
+    ]
+    df = spark.createDataFrame(data, ["spatial_id", "complaint_type"])
+    dom = geospatial._dominant(df, "spatial_id", "complaint_type", "dominant_complaint")
+    res = {r["spatial_id"]: r["dominant_complaint"] for r in dom.collect()}
+    assert res["cell_1"] == "UNKNOWN", f"Expected 'UNKNOWN' but got {res['cell_1']}"
+
+    # Verify same normalization in _dominant_by_cluster
+    cluster_data = [
+        (0, None, 1),
+        (0, "UNKNOWN", 1),
+        (1, "Noise", 2),
+    ]
+    c_df = spark.createDataFrame(cluster_data, ["cluster", "borough", "complaint_count"])
+    dom_c = clustering._dominant_by_cluster(c_df, "borough", "dominant_borough")
+    assert dom_c[0] == "UNKNOWN"

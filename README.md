@@ -15,9 +15,13 @@ prototype. Advisory outputs only, NOT a municipal dispatch tool.
 - Phase 2 (PySpark ETL to partitioned Parquet plus a machine-readable
   quality report): done. See `PROGRESS_PHASE2.md` and
   `reports/audit_phase2.md`.
-- Phases 3-8 (spatial analysis, pattern mining, forecasting, closure
-  modeling, dashboard depth, benchmarking, final delivery): not started.
-  CLI stubs exist and exit with code 2 until their phase lands.
+- Member 1 Phase 3 (Spark EDA, spatial analysis, comparative clustering):
+  implemented; see `PROGRESS_MEMBER1_PHASE3.md` for saved evidence.
+- Member 1 Phase 4 (bounded historical expansion and coverage audit):
+  see `PROGRESS_MEMBER1_PHASE4.md` for current verification and data coverage.
+- Member 1 Phases 5-8 (demand forecasting, forecast handoff, benchmarks,
+  final audit): pending. Mining, closure models and dashboard integration
+  belong to Members 2 and 3; their completion is not implied here.
 
 ## Technology stack
 
@@ -63,13 +67,25 @@ shells work without manual environment configuration.
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe scripts/download_sample.py --config configs/sample.yaml
 .\.venv\Scripts\python.exe scripts/run_etl.py --config configs/sample.yaml
+.\.venv\Scripts\python.exe scripts/run_member1_analytics.py --config configs/sample.yaml
 .\.venv\Scripts\python.exe -m streamlit run dashboard/app.py
 ```
 
-All four commands verified on the standard environment on 2026-10-14:
+The original test, sample download, ETL and dashboard commands were verified
+on the standard environment on 2026-10-14:
 33 pytest tests passed; the dashboard additionally smoke-tested
 headless (HTTP 200, no exceptions). `run_etl.py` also accepts
 `--snapshot-date YYYY-MM-DD` and `--master`.
+
+Member 1 historical expansion (separate from the 100k sample):
+
+```powershell
+.\.venv\Scripts\python.exe scripts/download_history.py --config configs/history.yaml
+.\.venv\Scripts\python.exe scripts/run_history_etl.py --config configs/history.yaml
+```
+
+Downloads resume verified daily checkpoints. Row/storage limits fail explicitly
+instead of truncating the time window. See `docs/member1/history_contract.md`.
 
 ## Repository layout
 
@@ -78,8 +94,8 @@ configs/      Fixed acquisition/ETL windows (sample + full-scale)
 data/         raw/ + processed/ (gitignored); manifests/ (small provenance JSON)
 src/          ingestion, processing, analytics, mining, modeling,
               prioritization, evaluation, utils
-scripts/      download_sample, run_etl (working); build_features,
-              train_models, benchmark (stubs for later phases)
+scripts/      Sample/history downloads, ETL, Member 1 analytics (working);
+              build_features, train_models, benchmark (later-phase stubs)
 tests/        unit/, integration/, fixtures/
 dashboard/    Streamlit app (reads computed artifacts only)
 notebooks/    EDA notebooks (render src/ logic, hold no pipeline code)

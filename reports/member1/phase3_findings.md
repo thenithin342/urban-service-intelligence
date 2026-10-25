@@ -47,7 +47,7 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
   8. `Abandoned Vehicle`: 2,393 (2.39%)
   9. `PLUMBING`: 2,328 (2.33%)
   10. `DOOR/WINDOW`: 1,771 (1.77%)
-- **Written Inference:** Brooklyn and Queens represent over 55% of all reported incidents. Illegal Parking and Residential Noise constitute over 23% of city-wide demand, while winter heating complaints (`HEAT/HOT WATER`) reflect seasonal temperature stress in January. However, these figures reflect *citizen reporting behavior* rather than absolute infrastructure failure rates; affluent or densely populated neighbourhoods often demonstrate higher digital engagement and propensity to file 311 tickets.
+- **Written Inference:** Brooklyn and Queens represent over 55% of reported incidents in this sample. Illegal Parking and Residential Noise constitute over 23% of reported volume. Heating complaints were observed in January, but this short sample cannot establish their seasonal pattern or cause. Counts reflect reported complaints; without compatible denominators and independent evidence, differences cannot be attributed to infrastructure quality, population density or reporting access.
 
 ### 2.2. Temporal Patterns & Peak Demand
 - **Daily Volume (`complaints_daily`):**
@@ -59,7 +59,8 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
   - Reporting reaches its minimum between 03:00 and 05:00 AM (< 150 complaints/hour).
   - Demand surges sharply starting at 07:00 AM, plateauing between 10:00 AM and 15:00 PM.
   - The single highest normalized hourly demand occurs on **Wednesday at 11:00 AM** with **721.5 average complaints/hour** (1,443 total across the two observed Wednesdays). Normalization prevents raw weekday sums from being artificially doubled relative to single-observation weekend days.
-- **Written Inference:** Municipal shift scheduling can be optimized around an 08:00–16:00 peak staffing window, with reduced night staffing.
+- **Written Inference:** The sample shows higher daytime reporting volume. It does not establish an optimal staffing schedule or justify reduced night staffing without capacity, service-cost and operational evidence.
+- **Methodological Note on Ingestion Completeness:** Daily completeness identified by observing records across the full diurnal span (00:00 to 23:59) is an observational heuristic, not definitive proof of complete API ingestion. Uninterrupted municipal pipeline ingestion requires auditing external Socrata API HTTP response logs and manifest byte receipts. Full historical ingestion expansion beyond the January 12 sample boundary is deferred to future project phases.
 
 ### 2.3. Resolution Duration Distribution
 - **Overall Population Breakdown ($N=100,000$):**
@@ -71,24 +72,24 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
 - **Parametric & Non-Parametric Statistics ($N=98,877$):**
   - **Mean:** 340.1838 hours (~14.17 days).
   - **Median ($P_{50}$):** 15.6103 hours (~15.61 hours).
-  - **90th Percentile ($P_{90}$):** 699.3587 hours (~29.14 days).
-  - **99th Percentile ($P_{99}$):** 6,973.4673 hours (~290.56 days).
+  - **90th Percentile ($P_{90}$):** 699.2756 hours via Spark GK-sketch (~29.14 days; exact rank 699.3587 h).
+  - **99th Percentile ($P_{99}$):** 6,973.4017 hours via Spark GK-sketch (~290.56 days; exact rank 6,973.4673 h).
   - **Maximum Observed Duration:** 23,639.3667 hours (~984.97 days, reflecting multi-year legacy reconciliation).
   - **Exact Rank vs. Distributed Spark GK-Sketch Quantile Reconciliation:**
 
-    | Metric | Exact Sorted Rank (NumPy/Pandas) | Spark `percentile_approx` (acc=50,000) | Spark `percentile_approx` (acc=10,000) | Relative Variance (acc=50,000 vs Exact) |
-    | :--- | :---: | :---: | :---: | :---: |
-    | **Median ($P_{50}$)** | 15.6103 h | 15.6103 h | 15.6064 h | **0.00%** (exact match) |
-    | **90th % ($P_{90}$)** | 699.3587 h | 699.2756 h | 698.2572 h | **0.01%** (< 0.1 hour diff) |
-    | **99th % ($P_{99}$)** | 6,973.4673 h | 6,973.4017 h | 6,912.9933 h | **0.001%** (< 0.1 hour diff) |
+    | Metric | Exact Sorted Rank (NumPy/Pandas) | Spark `percentile_approx` (acc=50,000) | Relative Variance (Spark acc=50,000 vs Exact) |
+    | :--- | :---: | :---: | :---: |
+    | **Median ($P_{50}$)** | 15.6103 h | 15.6103 h | **0.00%** (exact match) |
+    | **90th % ($P_{90}$)** | 699.3587 h | 699.2756 h | **0.01%** (< 0.1 hour diff) |
+    | **99th % ($P_{99}$)** | 6,973.4673 h | 6,973.4017 h | **0.001%** (< 0.1 hour diff) |
 
-    *Methodological Note:* Spark SQL's distributed `percentile_approx` utilizes the Greenwald-Khanna (GK) streaming sketch algorithm. Unlike driver-side in-memory sorting which requires collecting all 79k+ records to driver RAM, GK-sketches execute in a single distributed pass across executor partitions. At `accuracy=50,000`, the distributed sketch agrees with exact sorted interpolation to within < 0.01%. Claims of "exact five-number summary" have been corrected to "approximate five-number summary via Spark percentile_approx".
-- **By-Borough Resolution Differences (`resolution_by_borough`):**
-  - `QUEENS` (22,536 resolved): Median 6.87 h, Mean 315.08 h, $P_{90}$ 406.22 h, $P_{99}$ 6,973.40 h (fastest median resolution).
-  - `BROOKLYN` (32,206 resolved): Median 10.59 h, Mean 357.47 h, $P_{90}$ 713.71 h, $P_{99}$ 7,712.22 h.
+    *Methodological Note:* Spark SQL's distributed `percentile_approx` utilizes the Greenwald-Khanna (GK) streaming sketch algorithm. Unlike driver-side in-memory sorting which requires collecting all 98,877 resolved records to driver RAM, GK-sketches execute in a single distributed pass across executor partitions. At `accuracy=50,000`, the distributed sketch agrees with exact sorted interpolation to within < 0.01%. All Spark resolution metrics in the pipeline consistently use `accuracy=50,000`. Claims of "exact five-number summary" have been corrected to "approximate five-number summary via Spark percentile_approx".
+- **By-Borough Resolution Differences (`resolution_by_borough`, Spark acc=50,000):**
+  - `QUEENS` (22,536 resolved): Median 6.87 h, Mean 315.08 h, $P_{90}$ 406.38 h, $P_{99}$ 7,030.01 h (fastest median resolution).
+  - `BROOKLYN` (32,206 resolved): Median 10.59 h, Mean 357.47 h, $P_{90}$ 713.91 h, $P_{99}$ 7,758.45 h.
   - `STATEN ISLAND` (3,483 resolved): Median 14.63 h, Mean 481.41 h, $P_{90}$ 699.28 h, $P_{99}$ 11,924.91 h.
-  - `MANHATTAN` (19,665 resolved): Median 22.58 h, Mean 390.09 h, $P_{90}$ 1,084.99 h, $P_{99}$ 5,008.40 h.
-  - `BRONX` (20,910 resolved): Median 25.68 h, Mean 267.08 h, $P_{90}$ 694.01 h, $P_{99}$ 3,576.77 h.
+  - `MANHATTAN` (19,665 resolved): Median 22.61 h, Mean 390.09 h, $P_{90}$ 1,087.62 h, $P_{99}$ 5,008.42 h.
+  - `BRONX` (20,910 resolved): Median 25.69 h, Mean 267.08 h, $P_{90}$ 695.30 h, $P_{99}$ 3,582.07 h.
   - `UNKNOWN` (77 resolved): Median 191.74 h, Mean 1,175.30 h, $P_{90}$ 3,619.50 h, $P_{99}$ 8,563.82 h (unassigned tickets face substantial administrative delay).
 - **Methodological Rule:** Unresolved complaints (1,104 rows) and negative durations (19 rows) are explicitly excluded from resolution quantile calculations rather than filled with zero. Imputing zero would severely distort operational benchmarks, falsely indicating instantaneous resolution.
 
@@ -161,6 +162,7 @@ We evaluate 3 distinct preprocessing pipelines over the 873 spatial grid cells:
   - **Cluster 1 (Outer Periphery & Low Intensity):** 209 grid cells, 4,727 total complaints (4.79% of valid geo complaints; mean 22.62 complaints/cell). Centroid located at $40.58754^\circ\text{N}, -74.09725^\circ\text{W}$ (Staten Island / outer periphery, $x_m = -12,427.14\text{ m}, y_m = -12,435.61\text{ m}$). Dominant borough: `STATEN ISLAND` (157 cells; 3,452 complaints). Dominant complaint: `Illegal Parking` (131 cells). Resolved-record weighted mean resolution duration: **463.99 h** (replaces unweighted cell average of 606.11 h).
   - **Reconciliation Check:** $664 + 209 = 873$ cells (100%). $93,956 + 4,727 = 98,683$ complaints (exactly equal to total valid coordinate complaints). Dominant label basis is clarified: `cluster_summary` reports cell plurality, while underlying volume distributions confirm identical primary complaint types.
   - **Downstream Interface to Member 3:** Spatial grid cells are persisted with their primary cluster assignment (`spatial_grid_cells.cluster`), enabling Member 3's Streamlit dashboard and resource allocation models to directly consume cluster zoning without rerunning MLlib KMeans.
+  - **Cluster ID Stability Notice:** Unsupervised KMeans cluster integer IDs (`cluster: 0, 1`) are assigned dynamically by MLlib during centroid optimization. Cluster IDs are not guaranteed to maintain identical semantic identities (e.g. Core vs Periphery) across retraining runs, random seed modifications, or expanded date ranges. Downstream consumers (Member 3) must join on `spatial_id` or query `cluster_summary` attributes dynamically rather than hardcoding logic to numeric cluster indices.
 - **Strengths:** Fully distributed in PySpark; guaranteed global partitioning; fast convergence ($< 10$ seconds on 873 cells); scales seamlessly to millions of records.
 - **Limitations:** Forces spherical clusters of equal variance in scaled space; sensitive to choice of $k$; cannot identify arbitrary irregular spatial shapes (e.g. transit corridors).
 

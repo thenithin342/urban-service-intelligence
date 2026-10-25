@@ -121,8 +121,11 @@ def _dominant_by_cluster(
     from pyspark.sql import functions as F
     from pyspark.sql.window import Window
 
-    select_cols = ["cluster", value_col] + ([weight_col] if weight_col else [])
-    base = joined.select(*select_cols).fillna({value_col: "UNKNOWN"})
+    select_cols = ["cluster"] + ([weight_col] if weight_col else [])
+    base = joined.select(
+        *select_cols,
+        F.coalesce(F.col(value_col), F.lit("UNKNOWN")).alias(value_col),
+    )
     if weight_col:
         counts = base.groupBy("cluster", value_col).agg(
             F.sum(weight_col).alias("_n")

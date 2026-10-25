@@ -232,11 +232,11 @@ def hour_weekday_heatmap(df: DataFrame) -> DataFrame:
     )
 
 
-def resolution_by_borough(df: DataFrame) -> DataFrame:
+def resolution_by_borough(df: DataFrame, accuracy: int = 50000) -> DataFrame:
     """Resolution-hour summary over *resolved* rows only (null excluded).
 
     Quantiles (median, P90, P99) are computed using Spark SQL's distributed
-    percentile_approx (Greenwald-Khanna streaming sketch, accuracy=10,000).
+    percentile_approx (Greenwald-Khanna streaming sketch, accuracy=50,000).
     """
     return (
         df.filter(F.col("resolution_hours").isNotNull())
@@ -244,13 +244,13 @@ def resolution_by_borough(df: DataFrame) -> DataFrame:
         .agg(
             F.count(F.lit(1)).alias("resolved_rows"),
             F.round(F.mean("resolution_hours"), 3).alias("mean_hours"),
-            F.round(F.expr("percentile_approx(resolution_hours, 0.5, 10000)"), 3).alias(
+            F.round(F.expr(f"percentile_approx(resolution_hours, 0.5, {accuracy})"), 3).alias(
                 "median_hours"
             ),
-            F.round(F.expr("percentile_approx(resolution_hours, 0.9, 10000)"), 3).alias(
+            F.round(F.expr(f"percentile_approx(resolution_hours, 0.9, {accuracy})"), 3).alias(
                 "p90_hours"
             ),
-            F.round(F.expr("percentile_approx(resolution_hours, 0.99, 10000)"), 3).alias(
+            F.round(F.expr(f"percentile_approx(resolution_hours, 0.99, {accuracy})"), 3).alias(
                 "p99_hours"
             ),
             F.round(F.max("resolution_hours"), 3).alias("max_hours"),
@@ -265,9 +265,9 @@ def resolution_overall_stats(
     """Scalable Spark population statistics across all resolved rows.
 
     Quantiles are computed via Spark SQL's distributed percentile_approx
-    (Greenwald-Khanna streaming sketch, accuracy=50,000). For the 79,252 resolved
-    sample records, this distributed sketch yields median=15.61h, P90=699.28h,
-    and P99=6,973.40h (agreeing with exact sorted order to within <0.01%).
+    (Greenwald-Khanna streaming sketch, accuracy=50,000). For the 98,877 resolved
+    records in the 100k sample, this distributed sketch yields median=15.61h,
+    P90=699.28h, and P99=6,973.40h (agreeing with exact sorted order to within <0.01%).
     """
     resolved = df.filter(F.col("resolution_hours").isNotNull())
     row = resolved.agg(
@@ -332,12 +332,12 @@ def resolution_histogram_spark(
     return hist_sdf, summary
 
 
-def resolution_box_stats_spark(df: DataFrame) -> DataFrame:
+def resolution_box_stats_spark(df: DataFrame, accuracy: int = 50000) -> DataFrame:
     """Scalable Spark boxplot statistics per borough.
 
     Returns a 6-row DataFrame with approximate five-number summary statistics
-    via Spark percentile_approx (Greenwald-Khanna streaming sketch) for
-    rendering via matplotlib's ax.bxp without driver row collection.
+    via Spark percentile_approx (Greenwald-Khanna streaming sketch, accuracy=50,000)
+    for rendering via matplotlib's ax.bxp without driver row collection.
     """
     resolved = df.filter(F.col("resolution_hours").isNotNull())
     return (
@@ -348,9 +348,9 @@ def resolution_box_stats_spark(df: DataFrame) -> DataFrame:
             F.count(F.lit(1)).alias("resolved_rows"),
             F.round(F.mean("resolution_hours"), 2).alias("mean_hours"),
             F.round(F.min("resolution_hours"), 2).alias("min_hours"),
-            F.round(F.expr("percentile_approx(resolution_hours, 0.25, 10000)"), 2).alias("q1"),
-            F.round(F.expr("percentile_approx(resolution_hours, 0.5, 10000)"), 2).alias("med"),
-            F.round(F.expr("percentile_approx(resolution_hours, 0.75, 10000)"), 2).alias("q3"),
+            F.round(F.expr(f"percentile_approx(resolution_hours, 0.25, {accuracy})"), 2).alias("q1"),
+            F.round(F.expr(f"percentile_approx(resolution_hours, 0.5, {accuracy})"), 2).alias("med"),
+            F.round(F.expr(f"percentile_approx(resolution_hours, 0.75, {accuracy})"), 2).alias("q3"),
             F.round(F.max("resolution_hours"), 2).alias("max_hours"),
         )
         .orderBy("borough")
@@ -382,7 +382,9 @@ def time_coverage(
     """Observed daily coverage distinguishing observed span completeness vs calendar span.
 
     Dynamically calculates calendar days for arbitrary months/years without
-    hardcoding any specific month length or year.
+    hardcoding any specific month length or year. Note: daily completeness determined
+    from first/last observed hours (min_hour==0 and max_hour==23) is an observational
+    heuristic, not definitive proof of complete API ingestion.
     """
     bounds = df.agg(
         F.min("created_day").alias("start"),
@@ -406,7 +408,8 @@ def time_coverage(
         )
         .collect()
     )
-    # A day is complete if it has records across full diurnal range (min_hour==0 and max_hour==23)
+    # Heuristic: a day is classified complete if records span from hour 0 to hour 23.
+    # This is an observational heuristic, not definitive proof of complete API ingestion.
     complete_days = [
         r for r in daily_rows if int(r["min_hour"]) == 0 and int(r["max_hour"]) == 23
     ]

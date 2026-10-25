@@ -154,12 +154,17 @@ def _dominant(
 
     Partitions by cell_col, orders by frequency descending with ascending
     value_col tie-breaking, and filters for row_number == 1.
+    Missing/null values in value_col are normalized to 'UNKNOWN' before
+    grouping to prevent separate null and UNKNOWN buckets.
     """
+    normalized = df.select(
+        cell_col,
+        F.coalesce(F.col(value_col), F.lit("UNKNOWN")).alias(value_col),
+    )
     counts = (
-        df.groupBy(cell_col, value_col)
+        normalized.groupBy(cell_col, value_col)
         .count()
         .withColumnRenamed("count", "_n")
-        .fillna({value_col: "UNKNOWN"})
     )
     win = Window.partitionBy(cell_col).orderBy(
         F.col("_n").desc(), F.col(value_col).asc()

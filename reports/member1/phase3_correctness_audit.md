@@ -140,12 +140,12 @@ The audit investigated:
 | **99th Percentile ($P_{99}$)** | 6,631.6 h | 6,631.6 h | **6,973.4673 h** (~290.56 days) | **6,973.4673 h** |
 | **Maximum** | — | — | **23,639.3667 h** (~984.97 days) | **23,639.3667 h** |
 
-### Per-Borough Resolution Statistics (Exact PySpark Percentile Approx)
+### Per-Borough Resolution Statistics (PySpark Percentile Approx, Unified acc=50,000)
 From `artifacts/member1/analytics/tables/resolution_by_borough`:
-- `BRONX` (20,910 resolved): Mean 267.08 h, Median 25.68 h, $P_{90}$ 694.01 h, $P_{99}$ 3,576.77 h.
-- `BROOKLYN` (32,206 resolved): Mean 357.47 h, Median 10.59 h, $P_{90}$ 713.71 h, $P_{99}$ 7,712.22 h.
-- `MANHATTAN` (19,665 resolved): Mean 390.09 h, Median 22.58 h, $P_{90}$ 1,084.99 h, $P_{99}$ 5,008.40 h.
-- `QUEENS` (22,536 resolved): Mean 315.08 h, Median 6.87 h, $P_{90}$ 406.22 h, $P_{99}$ 6,973.40 h (fastest median).
+- `BRONX` (20,910 resolved): Mean 267.08 h, Median 25.69 h, $P_{90}$ 695.30 h, $P_{99}$ 3,582.07 h.
+- `BROOKLYN` (32,206 resolved): Mean 357.47 h, Median 10.59 h, $P_{90}$ 713.91 h, $P_{99}$ 7,758.45 h.
+- `MANHATTAN` (19,665 resolved): Mean 390.09 h, Median 22.61 h, $P_{90}$ 1,087.62 h, $P_{99}$ 5,008.42 h.
+- `QUEENS` (22,536 resolved): Mean 315.08 h, Median 6.87 h, $P_{90}$ 406.38 h, $P_{99}$ 7,030.01 h (fastest median).
 - `STATEN ISLAND` (3,483 resolved): Mean 481.41 h, Median 14.63 h, $P_{90}$ 699.28 h, $P_{99}$ 11,924.91 h.
 - `UNKNOWN` (77 resolved): Mean 1,175.30 h, Median 191.74 h, $P_{90}$ 3,619.50 h, $P_{99}$ 8,563.82 h.
 
@@ -371,3 +371,32 @@ Following independent source-code inspection of commit `602db4c`, five targeted 
   - Updated `figures.py::cluster_scatter` to render all 873 spatial grid cells colored by cluster assignment with bubble size proportional to complaint volume, with large red centroid markers overlaid.
 - **Verification:** Validated in `test_kmeans_and_summary`, `test_cluster_scatter_with_grid_cells_and_centers`, and verified via end-to-end artifact generation.
 
+---
+
+## 12. Final Pre-Merge Cleanup & Cross-Artifact Reconciliation
+
+Following the successful review of commit `4da3e98`, five final pre-merge cleanup items were executed:
+
+### 12.1. Unified Resolution Quantile Estimation (Accuracy=50,000 Standard)
+- **Action:** Removed mixed accuracy references across code, documentation, and figure takeaways. All Spark quantile estimations in `resolution_by_borough`, `resolution_box_stats_spark`, and `resolution_overall_stats` consistently use `accuracy=50,000`.
+- **Reconciled Values ($N=98,877$ resolved records):**
+  - **Mean:** 340.18 h (340.1838 h)
+  - **Median ($P_{50}$):** 15.61 h (15.6103 h, exact match)
+  - **90th Percentile ($P_{90}$):** 699.28 h (699.2756 h via Spark acc=50,000; exact rank 699.36 h)
+  - **99th Percentile ($P_{99}$):** 6,973.40 h (6,973.4017 h via Spark acc=50,000; exact rank 6,973.47 h)
+- **Elimination of Mixed Accuracy:** Deprecated and removed all references to legacy `accuracy=10,000` estimates ($698.26\text{ h} / 6,912.99\text{ h}$).
+
+### 12.2. Resolved Row Population Count Verification
+- **Action:** Corrected an outdated docstring reference citing 79,252 resolved rows in `resolution_overall_stats`. The true, verified population count across the cleaned Parquet dataset is **98,877 resolved records** ($100,000 - 1,104\text{ unresolved} - 19\text{ negative\_duration} = 98,877$).
+
+### 12.3. Categorical Value Normalization Before GroupBy in `_dominant`
+- **Issue:** In `_dominant`, `.fillna({value_col: "UNKNOWN"})` was invoked *after* `.groupBy(cell_col, value_col)`. If a category contained both `null` and `"UNKNOWN"` entries, Spark SQL split them into separate partition groups, allowing a third category with fewer total occurrences to erroneously win.
+- **Correction:** Missing/null categorical values are now normalized to `"UNKNOWN"` *before* `groupBy` using `F.coalesce(F.col(value_col), F.lit("UNKNOWN"))` in both `src/analytics/geospatial.py::_dominant` and `src/analytics/clustering.py::_dominant_by_cluster`.
+- **Verification:** Added `test_dominant_normalizes_null_and_unknown_before_groupby` in `tests/integration/test_member1_spark.py`. Verified that when `null` and `"UNKNOWN"` records are merged, their combined count correctly dominates competing categories.
+
+### 12.4. Downstream Cluster ID Stability Contract
+- **Action:** Added an explicit stability disclaimer in `docs/member1/artifact_contract.md` and `reports/member1/phase3_findings.md`.
+- **Contract Rule:** Unsupervised KMeans integer IDs (`cluster: 0, 1`) are arbitrary permutation labels assigned during centroid optimization and are not guaranteed to retain identical semantic meanings (e.g. Core vs Periphery) across retraining or historical expansion. Member 3 consumers must query `cluster_summary` attributes (`cells`, `mean_complaints_per_cell`) or join on `spatial_id` dynamically rather than hardcoding business rules to `cluster == 0`.
+
+### 12.5. Heuristic Nature of Daily Completeness Disclosed
+- **Action:** Documented across code docstrings, artifact contracts, and findings reports that classifying daily completeness via diurnal boundary hours (`min_hour == 0 and max_hour == 23`) is an observational heuristic, not definitive proof of exhaustive Socrata API ingestion. Formal ingestion verification requires Socrata HTTP response and manifest auditing. Historical dataset expansion is deferred to future project phases.

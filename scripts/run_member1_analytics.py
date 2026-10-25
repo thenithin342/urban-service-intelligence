@@ -128,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         cells = geospatial.cell_features(
             df, m1["grid_cell_deg"], m1["projection_lat0"], m1["projection_lon0"], 1
         )
+        cells = cells.localCheckpoint(eager=True)
         table_meta["spatial_hotspots"] = _write_table(hot, tables_dir / "spatial_hotspots")
         table_meta["zip_hotspots"] = _write_table(zips, tables_dir / "zip_hotspots")
         hot_pd = spark_eda.bounded_pandas(hot, cap)

@@ -1,0 +1,11 @@
+# Phase 4 bounded initial expansion. Full days, exclusive end; no row truncation.
+base_url: https://data.cityofnewyork.us/resource/erm2-nwe9.json
+metadata_url: https://data.cityofnewyork.us/api/views/erm2-nwe9
+start: '2023-12-01'
+end: '2024-03-01'
+page_size: 50000
+max_rows: 1200000
+max_bytes: 600000000
+timeout_seconds: 180
+max_retries: 4
+out_dir: data/raw/member1_history
