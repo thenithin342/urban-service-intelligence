@@ -139,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
             "min_confidence": m2["min_confidence"]})
         contracts.write_table(itemsets, root, "frequent_itemsets", {
             **base_meta, "min_support": m2["min_support"]})
-        grid = pd.concat([g for g in (p_grid, s_grid) if not g.empty], ignore_index=True)
+        parts = [g for g in (p_grid, s_grid) if not g.empty]
+        grid = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
         if not grid.empty:
             contracts.write_table(grid, root, "mining_threshold_experiments", {
                 **base_meta, "basket_definition": None,
