@@ -36,6 +36,12 @@ build/
 # Agent harness metadata (local-only, not project code)
 .qodo/
 
+# Local working progress and planning handoffs
+/AGENTS.md
+/PROGRESS_*.md
+/PS1_Three_Member_Plan_Phases_3_to_8*.md
+/Urban_Service_Intelligence_Member1_Agent_Master_Prompt.md
+
 # Caches / OS
 .pytest_cache/
 .ruff_cache/

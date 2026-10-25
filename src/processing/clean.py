@@ -276,5 +276,7 @@ def read_raw(spark: SparkSession, path: str) -> DataFrame:
     return (
         spark.read.schema(RAW_SCHEMA)
         .option("header", "true")
+        .option("multiLine", "true")
+        .option("escape", '"')
         .csv(path)
     )

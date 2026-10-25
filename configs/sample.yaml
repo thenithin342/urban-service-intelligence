@@ -33,3 +33,24 @@ eda_outdir: artifacts/eda_sample
 input_csv: data/raw/nyc311_sample.csv
 etl_output: data/processed/nyc311_clean
 etl_quality_report: data/processed/etl_quality.json
+
+# Member 1 Phase 3 analytics (src/analytics, scripts/run_member1_analytics.py).
+# Outputs are gitignored; the artifact contract is documented in
+# docs/member1/artifact_contract.md. Bounds below are driver-collection
+# guards, not sampling of source records.
+member1:
+  analytics_outdir: artifacts/member1/analytics
+  top_categories: 20
+  grid_cell_deg: 0.01          # deterministic lat/lon grid cell (~1.1 km lat)
+  hotspot_min_count: 50        # min complaints per grid cell to report
+  kmeans_k_values: [2, 3, 4, 5, 6, 8]
+  kmeans_seed: 42
+  # Primary feature variant (justified: comparable scales). Ablation still
+  # reports log_count_unscaled and count_scaled for comparison.
+  kmeans_variant: log_count_scaled
+  dbscan_eps_meters: 250
+  dbscan_eps_grid: [100, 250, 500, 1000]   # parameter-sensitivity sweep
+  dbscan_min_pts: 25
+  dbscan_sample_cap: 20000     # bounded sample for single-node DBSCAN
+  dbscan_seed: 42
+  max_collect_rows: 20000      # bounded driver collection guard for tables
