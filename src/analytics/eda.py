@@ -91,9 +91,10 @@ def volume_over_time(df: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
     w = normalize_frame(df).dropna(subset=["created_ts"]).copy()
     if w.empty:
         return pd.DataFrame(columns=["period", "n"])
-    w["period"] = w["created_ts"].dt.floor(freq).dt.strftime("%Y-%m-%d")
     if freq.upper().startswith("W"):
-        w["period"] = w["created_ts"].dt.floor("D").dt.to_period("W").astype(str)
+        w["period"] = w["created_ts"].dt.tz_localize(None).dt.to_period(freq).astype(str)
+    else:
+        w["period"] = w["created_ts"].dt.floor(freq).dt.strftime("%Y-%m-%d")
     out = (
         w.groupby("period").size().reset_index(name="n").sort_values("period")
     ).reset_index(drop=True)

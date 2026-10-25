@@ -1,0 +1,11 @@
+input_parquet: data/processed/member1_multiseason
+source_manifest: data/raw/member1_multiseason/manifest.json
+quality_report: artifacts/member1/multiseason/etl_quality.json
+output_dir: artifacts/member1/demand_multiseason
+train_end: '2024-06-30'
+validation_end: '2024-08-31'
+seed: 42
+category_top_n: 3
+category_min_train_count: 100
+category_min_nonzero_days: 28
+origin_step_days: 7

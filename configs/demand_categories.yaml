@@ -1,0 +1,11 @@
+input_parquet: data/processed/member1_history
+source_manifest: data/raw/member1_history/manifest.json
+quality_report: artifacts/member1/phase4/etl_quality.json
+output_dir: artifacts/member1/demand_categories
+train_end: '2024-01-31'
+validation_end: '2024-02-14'
+seed: 42
+category_top_n: 3
+category_min_train_count: 100
+category_min_nonzero_days: 28
+origin_step_days: 1

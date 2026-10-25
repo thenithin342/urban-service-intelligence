@@ -18,9 +18,9 @@ prototype. Advisory outputs only, NOT a municipal dispatch tool.
   implemented; see `reports/member1/phase3_findings.md` for saved evidence.
 - Member 1 Phase 4 (bounded historical expansion and coverage audit):
   implemented; see `reports/member1/premerge_audit.md` for verification and coverage.
-- Member 1 Phases 5-8 (demand forecasting, forecast handoff, benchmarks,
-  final audit): pending. Mining, closure models and dashboard integration
-  belong to Members 2 and 3; their completion is not implied here.
+- Member 1 Phases 5-8 (demand regression/forecasting, forecast feature handoff,
+  measured Pandas/Spark benchmarks, final artifact audit): implemented. See
+  `reports/member1/phases5_to_8_results.md` for measured results and verification.
 - Member 3 Phases 3-7 (Streamlit dashboard, output adapters and checks,
   advisory priority score + backtest, CI, integration): implemented. The
   dashboard renders Member 1 Phase 3 tables and Member 3 priorities from real
@@ -30,6 +30,8 @@ prototype. Advisory outputs only, NOT a municipal dispatch tool.
   and `docs/runbook_windows.md`.
 
 The latest Member 1 end-to-end verification, fixes and known limits are recorded
+in `reports/member1/phases5_to_8_results.md`, including the follow-up bug fixes.
+The earlier pipeline audit remains
 in `reports/member1/premerge_audit.md`.
 
 ## Technology stack
@@ -108,6 +110,22 @@ Member 1 historical expansion (separate from the 100k sample):
 Downloads resume verified daily checkpoints. Row/storage limits fail explicitly
 instead of truncating the time window. See `docs/member1/history_contract.md`.
 
+Member 1 demand study and handoff (after historical ETL):
+
+```powershell
+.\.venv\Scripts\python.exe scripts/build_features.py --config configs/demand.yaml
+.\.venv\Scripts\python.exe scripts/train_models.py --config configs/demand.yaml
+.\.venv\Scripts\python.exe scripts/build_priority_features.py --config configs/demand.yaml
+.\.venv\Scripts\python.exe scripts/benchmark.py --config configs/benchmark.yaml
+.\.venv\Scripts\python.exe scripts/audit_member1.py --config configs/demand.yaml --benchmark-config configs/benchmark.yaml
+```
+
+Run benchmarks without competing Spark/model jobs. Forecasts are based on the
+historical origin 2024-02-29, not today's date; three winter months do not establish
+annual accuracy. Model selection uses validation data only. The demand scripts
+do not train closure models or generate priority scores. Contracts and consumer
+examples are in `docs/member1/demand_contract.md`.
+
 ## Repository layout
 
 ```text
@@ -115,8 +133,8 @@ configs/      Fixed acquisition/ETL windows (sample + full-scale)
 data/         raw/ + processed/ (gitignored); manifests/ (small provenance JSON)
 src/          ingestion, processing, analytics, mining, modeling,
               prioritization, evaluation, utils
-scripts/      Sample/history downloads, ETL, Member 1 analytics (working);
-              build_features, train_models, benchmark (later-phase stubs)
+scripts/      Sample/history downloads, ETL, analytics, demand feature/model
+              study, handoff, benchmark and final audit commands
 tests/        unit/, integration/, fixtures/
 dashboard/    Streamlit app (reads computed artifacts only)
 notebooks/    EDA notebooks (render src/ logic, hold no pipeline code)

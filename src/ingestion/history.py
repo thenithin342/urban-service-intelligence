@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import time
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -27,8 +28,16 @@ def daily_windows(start: str, end: str):
 
 def save_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    for attempt in range(6):
+        try:
+            temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            # Windows readers/sync tools can briefly lock an otherwise writable file.
+            time.sleep(0.1 * 2**attempt)
 
 
 def download_history(config: dict, root: Path) -> dict:
@@ -51,7 +60,7 @@ def download_history(config: dict, root: Path) -> dict:
     save_json(identity_path, identity)
     manifest_path = folder / "manifest.json"
     manifest = {**identity, "complete": False, "days": [], "failures": [],
-                "started_at_utc": datetime.now(timezone.utc).isoformat()}  # noqa: UP017 (Python 3.10)
+                "started_at_utc": datetime.now(timezone.utc).isoformat()}
     save_json(manifest_path, manifest)
     with requests.Session() as session:
         token = os.environ.get("SOCRATA_APP_TOKEN")
@@ -139,7 +148,7 @@ def download_history(config: dict, root: Path) -> dict:
                         temporary.replace(path)
                         info = {"day": day, "rows": len(seen), "sha256": sha256_file(path),
                                 "bytes": path.stat().st_size,
-                                "acquired_at_utc": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
+                                "acquired_at_utc": datetime.now(timezone.utc).isoformat(),
                                 "requests": requests_log}
                         save_json(checkpoint, info)
                     finally:
@@ -160,7 +169,7 @@ def download_history(config: dict, root: Path) -> dict:
             manifest.update(complete=True, rows_written=sum(monthly.values()),
                             bytes_written=used_bytes, monthly_rows=dict(monthly),
                             zero_complaint_days=[d for d, n in expected.items() if n == 0],
-                            verified_at_utc=datetime.now(timezone.utc).isoformat())  # noqa: UP017
+                            verified_at_utc=datetime.now(timezone.utc).isoformat())
             save_json(manifest_path, manifest)
         except Exception as error:
             manifest["failures"].append(str(error))

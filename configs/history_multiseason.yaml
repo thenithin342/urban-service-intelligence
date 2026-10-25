@@ -1,0 +1,12 @@
+base_url: https://data.cityofnewyork.us/resource/erm2-nwe9.json
+metadata_url: https://data.cityofnewyork.us/api/views/erm2-nwe9
+start: '2023-12-01'
+end: '2024-12-01'
+page_size: 50000
+max_rows: 5000000
+max_bytes: 2500000000
+timeout_seconds: 180
+max_retries: 4
+out_dir: data/raw/member1_multiseason
+etl_output: data/processed/member1_multiseason
+etl_quality_report: artifacts/member1/multiseason/etl_quality.json

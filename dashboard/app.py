@@ -20,6 +20,7 @@ VIEWS = Path(__file__).resolve().parent / "views"
 
 st.set_page_config(page_title="Urban Service Intelligence", layout="wide")
 
+
 PAGES = {
     "Analytics (Member 1 outputs)": [
         st.Page(str(VIEWS / "overview.py"), title="Overview", default=True),

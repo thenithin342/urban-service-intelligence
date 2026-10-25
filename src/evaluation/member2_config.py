@@ -106,7 +106,7 @@ def resolve(root: Path, value: str | Path) -> Path:
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()  # noqa: UP017
+    return datetime.now(timezone.utc).isoformat()
 
 
 def write_json(path: Path, obj: Any) -> Path:

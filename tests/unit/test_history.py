@@ -2,12 +2,39 @@
 
 import csv
 import json
+from pathlib import Path
 
 import pytest
 
 from src.ingestion.downloader import DEFAULT_FIELDS
-from src.ingestion.history import daily_windows, download_history
+from src.ingestion.history import daily_windows, download_history, save_json
 from src.processing.history import process_history
+
+
+@pytest.mark.parametrize("permanent", [False, True])
+def test_manifest_write_preserves_previous_file_during_lock(tmp_path, monkeypatch, permanent):
+    path = tmp_path / "state.json"
+    path.write_text('{"previous": true}')
+    replace = Path.replace
+    calls = []
+
+    def locked(source, target):
+        calls.append(source)
+        assert json.loads(path.read_text()) == {"previous": True}
+        if permanent or len(calls) <= 2:
+            raise PermissionError("simulated Windows file lock")
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", locked)
+    monkeypatch.setattr("src.ingestion.history.time.sleep", lambda _: None)
+    if permanent:
+        with pytest.raises(PermissionError, match="file lock"):
+            save_json(path, {"complete": True})
+        assert json.loads(path.read_text()) == {"previous": True}
+    else:
+        save_json(path, {"complete": True})
+        assert json.loads(path.read_text()) == {"complete": True}
+    assert len(calls) > 1
 
 
 def config():

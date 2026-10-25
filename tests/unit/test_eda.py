@@ -51,6 +51,13 @@ def test_volume_over_time_sorted_and_counts():
     assert int(vol["n"].sum()) == 7
 
 
+def test_weekly_volume_handles_sunday_monday_boundary():
+    frame = pd.DataFrame({"created_date": ["2024-01-07T23:59:00", "2024-01-08T00:00:00"]})
+    weekly = volume_over_time(frame, freq="W")
+    assert weekly.to_dict("records") == [{"period": "2024-01-01/2024-01-07", "n": 1},
+                                          {"period": "2024-01-08/2024-01-14", "n": 1}]
+
+
 def test_profile_reports_duplicates_nulls_invalid():
     df = load_fixture()
     prof = compute_profile(df)

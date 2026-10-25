@@ -5,12 +5,27 @@ import json
 from pathlib import Path
 
 import pytest
+from py4j.protocol import Py4JJavaError
 
 from scripts.run_member1_analytics import main
 from src.analytics import clustering
 from src.ingestion.downloader import DEFAULT_FIELDS
 from src.processing.clean import clean, read_raw
 from src.utils.spark import get_spark
+
+
+def test_csv_reader_rejects_reordered_header(tmp_path):
+    path = tmp_path / "reordered.csv"
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(reversed(DEFAULT_FIELDS)))
+        writer.writeheader()
+        writer.writerow({"unique_key": "123", "latitude": "40.7", "longitude": "-73.9"})
+    spark = get_spark("audit-csv-header")
+    try:
+        with pytest.raises(Py4JJavaError, match="CSV header does not conform"):
+            read_raw(spark, str(path)).collect()
+    finally:
+        spark.stop()
 
 
 def test_csv_reader_preserves_quoted_newlines(tmp_path):

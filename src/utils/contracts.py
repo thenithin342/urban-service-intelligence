@@ -298,7 +298,7 @@ def write_table(df: pd.DataFrame, root: str | Path, name: str, meta: dict) -> Pa
     df.to_parquet(out / "part-00000.parquet", index=False)
     full = {
         "contract_version": CONTRACT_VERSION,
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "is_fixture": False,
         "rows": len(df),
         **meta,

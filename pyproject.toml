@@ -1,0 +1,25 @@
+[tool.ruff]
+line-length = 200
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "RUF", "DTZ"]
+extend-ignore = ["E501"]  # Pre-existing long lines are not regressions; enforce separately if desired
+
+[tool.ruff.lint.per-file-ignores]
+# Test fixtures intentionally use naive datetimes that represent NYC wall-clock
+# timestamps, matching the ETL contract in src/processing/clean.py (lines 10-12).
+# Adding tzinfo would corrupt values fed into Spark TimestampType columns.
+# Long inline data rows in tests are left unformatted for readability.
+"tests/**" = ["DTZ001", "DTZ007", "E501"]
+# date.today() fallback for snapshot label; timezone-awareness not required here.
+"src/processing/clean.py" = ["DTZ011"]
+# Scripts and dashboard views/adapters do sys.path.insert() before local
+# imports (required for standalone CLI and Streamlit page loading).
+"scripts/**" = ["E402"]
+"dashboard/**" = ["E402"]
+
+[tool.pytest.ini_options]
+# IMPORTANT: always invoke via .venv\Scripts\python.exe -m pytest
+# The system python (3.13 + PySpark 4.0) is incompatible with this project.
+# Python 3.10 + PySpark 3.5.3 (in .venv) are required.
+testpaths = ["tests"]

@@ -174,7 +174,8 @@ def clean(df_raw: DataFrame, snapshot: str | None = None) -> tuple[DataFrame, di
     )
 
     clean_df = (
-        w.withColumn("complaint_raw", F.col("complaint_type"))
+        w.withColumn("data_quality_flags", flags)
+        .withColumn("complaint_raw", F.col("complaint_type"))
         .withColumn("complaint_type", complaint_std)
         .withColumn("descriptor", F.trim(F.col("descriptor")))
         .withColumn("agency", F.trim(F.col("agency")))
@@ -193,7 +194,6 @@ def clean(df_raw: DataFrame, snapshot: str | None = None) -> tuple[DataFrame, di
         .withColumn("year", F.year(created))
         .withColumn("hour", F.hour(created))
         .withColumn("data_snapshot_date", F.to_date(F.lit(snap)))
-        .withColumn("data_quality_flags", flags)
         .select(
             "unique_key", "created_at", "closed_at",
             "complaint_raw", "complaint_type",
@@ -273,9 +273,11 @@ def write_clean(df: DataFrame, path: str) -> None:
 
 
 def read_raw(spark: SparkSession, path: str) -> DataFrame:
+    """Read canonical ingestion columns, rejecting mismatched CSV headers."""
     return (
         spark.read.schema(RAW_SCHEMA)
         .option("header", "true")
+        .option("enforceSchema", "false")
         .option("multiLine", "true")
         .option("escape", '"')
         .csv(path)
