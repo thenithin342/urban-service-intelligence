@@ -24,6 +24,7 @@ Environment overrides (used by tests):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
@@ -42,6 +43,8 @@ from src.utils import contracts
 try:  # Streamlit is optional for CLI use (scripts/check_outputs.py).
     import streamlit as st
 
+    if not st.runtime.exists():  # CLI use: cached readers work, silence the notice
+        logging.getLogger("streamlit.runtime.caching.cache_data_api").setLevel(logging.ERROR)
     _cache = st.cache_data(show_spinner=False, max_entries=256)
 except ImportError:  # pragma: no cover - streamlit is pinned in requirements
     def _cache(func):  # type: ignore[no-redef]

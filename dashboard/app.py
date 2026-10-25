@@ -29,6 +29,10 @@ PAGES = {
     ],
     "Models (Members 1-2 outputs)": [
         st.Page(str(VIEWS / "patterns.py"), title="Pattern Explorer"),
+        st.Page(str(VIEWS / "forecasts.py"), title="Forecasts and Closure"),
+    ],
+    "Integration (Member 3)": [
+        st.Page(str(VIEWS / "status.py"), title="Output Status"),
     ],
 }
 

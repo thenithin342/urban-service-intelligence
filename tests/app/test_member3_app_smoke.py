@@ -103,3 +103,15 @@ def test_app_reads_only_small_artifact_tables(monkeypatch):
     for path in seen:
         assert path.startswith(art), f"app read a non-artifact file: {path}"
         assert "nyc311_clean" not in path and "member1_history" not in path
+
+
+def test_forecast_page_shows_cutoff_horizon_and_versions_from_table(empty_root):
+    at = run_page("forecasts.py")
+    metrics = {m.label: str(m.value) for m in at.metric}
+    # Values come from the labelled demand_forecast / closure fixtures.
+    assert metrics["Training cutoff"] == "2024-01-12"
+    assert metrics["Horizon (days)"] == "7"
+    assert metrics["Model version"] == "fixture-0"
+    assert metrics["Train cutoff"] == "2024-01-08"
+    warnings = " ".join(str(w.value) for w in at.warning)
+    assert "FIXTURE: demand_forecast" in warnings
