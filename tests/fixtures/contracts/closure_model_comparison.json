@@ -1,0 +1,39 @@
+{
+  "meta": {
+    "contract_version": "1.0.0",
+    "producer": "fixture",
+    "generated_at_utc": "2026-10-25T00:00:00+00:00",
+    "is_fixture": true,
+    "note": "SYNTHETIC CONTRACT FIXTURE - invented values for UI/schema tests only; not a measured result.",
+    "coverage_start": "2024-01-01",
+    "coverage_end": "2024-01-12",
+    "model_version": "fixture-0",
+    "train_cutoff": "2024-01-08"
+  },
+  "rows": [
+    {
+      "model": "prior_rate",
+      "split": "test",
+      "n": 1000,
+      "positive_rate": 0.8,
+      "pr_auc": 0.8,
+      "roc_auc": 0.5,
+      "brier": 0.16,
+      "precision_at_05": 0.8,
+      "recall_at_05": 1.0,
+      "model_version": "fixture-0"
+    },
+    {
+      "model": "logistic_regression",
+      "split": "test",
+      "n": 1000,
+      "positive_rate": 0.8,
+      "pr_auc": 0.9,
+      "roc_auc": 0.75,
+      "brier": 0.12,
+      "precision_at_05": 0.86,
+      "recall_at_05": 0.93,
+      "model_version": "fixture-0"
+    }
+  ]
+}

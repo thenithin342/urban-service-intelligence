@@ -9,3 +9,27 @@ max_bytes: 600000000
 timeout_seconds: 180
 max_retries: 4
 out_dir: data/raw/member1_history
+
+# Member 2 mining / closure modeling on the cleaned history
+# (run_history_etl output). Block appended by Member 2; keys above unchanged.
+member2:
+  input: data/processed/member1_history
+  outdir: artifacts/member2
+  basket_granularity: week
+  drop_partial_weeks: true       # mine complete Monday-Sunday weeks only
+  min_support: 0.6
+  min_confidence: 0.8
+  support_grid: [0.5, 0.6, 0.7, 0.8]
+  confidence_grid: [0.5, 0.7, 0.9]
+  secondary_granularity: day
+  secondary_support_grid: [0.1, 0.2, 0.3, 0.4]
+  secondary_min_support: 0.2
+  secondary_min_confidence: 0.8
+  closure_horizon_days: 7
+  train_cutoff: '2024-02-01'     # test = created_day 2024-02-01..2024-02-29
+  label_embargo_days: 7          # train = created_day < 2024-01-25
+  validation_days: 7             # model selection on 2024-01-18..2024-01-24
+  top_categories: 40
+  smoothing_alpha: 20.0
+  min_cohort_n: 30
+  seed: 42

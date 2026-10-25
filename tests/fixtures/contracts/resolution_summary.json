@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "contract_version": "1.0.0",
+    "producer": "fixture",
+    "generated_at_utc": "2026-10-25T00:00:00+00:00",
+    "is_fixture": true,
+    "note": "SYNTHETIC CONTRACT FIXTURE - invented values for UI/schema tests only; not a measured result.",
+    "coverage_start": "2024-01-01",
+    "coverage_end": "2024-01-12"
+  },
+  "rows": [
+    {
+      "borough": "BROOKLYN",
+      "complaint_type": "HEAT/HOT WATER",
+      "total_count": 500,
+      "eligible_count": 495,
+      "closed_7d_count": 400,
+      "closure_rate_7d": 0.808,
+      "median_resolution_hours": 40.0,
+      "p90_resolution_hours": 150.0,
+      "unresolved_count": 5,
+      "coverage_start": "2024-01-01",
+      "coverage_end": "2024-01-12"
+    },
+    {
+      "borough": "QUEENS",
+      "complaint_type": "Illegal Parking",
+      "total_count": 600,
+      "eligible_count": 600,
+      "closed_7d_count": 590,
+      "closure_rate_7d": 0.983,
+      "median_resolution_hours": 2.5,
+      "p90_resolution_hours": 9.0,
+      "unresolved_count": 0,
+      "coverage_start": "2024-01-01",
+      "coverage_end": "2024-01-12"
+    },
+    {
+      "borough": null,
+      "complaint_type": "Abandoned Vehicle",
+      "total_count": 10,
+      "eligible_count": 10,
+      "closed_7d_count": 6,
+      "closure_rate_7d": 0.6,
+      "median_resolution_hours": 120.0,
+      "p90_resolution_hours": 300.0,
+      "unresolved_count": 0,
+      "coverage_start": "2024-01-01",
+      "coverage_end": "2024-01-12"
+    }
+  ]
+}
