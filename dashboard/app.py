@@ -27,6 +27,9 @@ PAGES = {
         st.Page(str(VIEWS / "hotspots.py"), title="Hotspots"),
         st.Page(str(VIEWS / "resolution.py"), title="Resolution"),
     ],
+    "Models (Members 1-2 outputs)": [
+        st.Page(str(VIEWS / "patterns.py"), title="Pattern Explorer"),
+    ],
 }
 
 nav = st.navigation(PAGES)
