@@ -21,6 +21,13 @@ prototype. Advisory outputs only, NOT a municipal dispatch tool.
 - Member 1 Phases 5-8 (demand forecasting, forecast handoff, benchmarks,
   final audit): pending. Mining, closure models and dashboard integration
   belong to Members 2 and 3; their completion is not implied here.
+- Member 3 Phases 3-7 (Streamlit dashboard, output adapters and checks,
+  advisory priority score + backtest, CI, integration): implemented. The
+  dashboard renders Member 1 Phase 3 tables and Member 3 priorities from real
+  outputs; Member 2 mining/closure and Member 1 forecast panels show labelled
+  synthetic FIXTURES until those producers publish. See
+  `reports/member3/integration_report.md`, `docs/member3/priority_scoring.md`
+  and `docs/runbook_windows.md`.
 
 The latest Member 1 end-to-end verification, fixes and known limits are recorded
 in `reports/member1/premerge_audit.md`.
@@ -72,6 +79,18 @@ shells work without manual environment configuration.
 .\.venv\Scripts\python.exe scripts/run_member1_analytics.py --config configs/sample.yaml
 .\.venv\Scripts\python.exe -m streamlit run dashboard/app.py
 ```
+
+Member 3 priorities and output checks (full sequence from a fresh clone:
+`docs/runbook_windows.md`):
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_member3_priorities.py --config configs/sample.yaml --input data/processed/member1_history
+.\.venv\Scripts\python.exe scripts/check_outputs.py --allow-missing
+```
+
+The dashboard (`dashboard/app.py`, pages in `dashboard/views/`) reads only
+small aggregate artifacts through `dashboard/adapters.py`, never the raw or
+cleaned record-level data, and labels every panel REAL, FIXTURE or MISSING.
 
 The original test, sample download, ETL and dashboard commands were verified
 on the standard environment on 2026-10-14:
@@ -126,7 +145,9 @@ docs/         Architecture, data dictionary, decisions log
 ETL contract, CLI validation), Spark integration tests (real
 Python-worker transformations, ETL edge cases, idempotent reruns),
 and an end-to-end ETL test over the real 100,000-record sample.
-`ruff check src scripts tests` must be clean.
+`tests/app/` holds the dashboard adapter, check and Streamlit AppTest smoke
+tests. `ruff check src scripts tests dashboard` must be clean. CI
+(`.github/workflows/ci.yml`) runs lint and pytest on Python 3.10 / Java 17.
 
 ## Limitations
 

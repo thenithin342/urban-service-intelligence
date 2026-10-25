@@ -1,0 +1,77 @@
+# CI quality gate (Member 3). Lint + full pytest on Python 3.10 / Java 17.
+# Data-dependent checks: the dashboard real-artifact tests skip with an
+# explicit reason when artifacts/ is absent (it is gitignored), and the
+# 100k-sample ETL end-to-end test needs the downloaded sample, so the default
+# job deselects it; run the "sample-e2e" job manually (workflow_dispatch)
+# to download the fixed January 2024 sample and execute it.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_sample_e2e:
+        description: "Download the 100k sample and run the real-data ETL test"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONHASHSEED: "0"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Versions
+        run: |
+          python -V
+          java -version
+          python -c "import pyspark, pandas, streamlit; print(pyspark.__version__, pandas.__version__, streamlit.__version__)"
+      - name: Lint
+        run: ruff check src scripts tests dashboard
+      - name: Tests
+        run: >
+          python -m pytest -q -rs
+          --deselect tests/integration/test_etl_end_to_end.py::test_end_to_end_100k_sample
+      - name: Output checks (fixtures allowed; artifacts are not in git)
+        run: python scripts/check_outputs.py --allow-missing
+
+  sample-e2e:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_sample_e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pip install -r requirements.txt
+      - name: Download fixed sample
+        run: python scripts/download_sample.py --config configs/sample.yaml
+      - name: Real-data ETL test
+        run: python -m pytest -q tests/integration/test_etl_end_to_end.py

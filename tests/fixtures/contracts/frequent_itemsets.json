@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "contract_version": "1.0.0",
+    "producer": "fixture",
+    "generated_at_utc": "2026-10-25T00:00:00+00:00",
+    "is_fixture": true,
+    "note": "SYNTHETIC CONTRACT FIXTURE - invented values for UI/schema tests only; not a measured result.",
+    "coverage_start": "2024-01-01",
+    "coverage_end": "2024-01-12",
+    "model_version": "fixture-0"
+  },
+  "rows": [
+    {
+      "items": [
+        "Noise - Residential"
+      ],
+      "item_count": 1,
+      "freq": 210,
+      "support": 0.525,
+      "n_baskets": 400,
+      "model_version": "fixture-0"
+    },
+    {
+      "items": [
+        "HEAT/HOT WATER",
+        "PLUMBING"
+      ],
+      "item_count": 2,
+      "freq": 72,
+      "support": 0.18,
+      "n_baskets": 400,
+      "model_version": "fixture-0"
+    }
+  ]
+}
