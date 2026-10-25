@@ -1,0 +1,5 @@
+source_dir: data/raw/member1_history
+output_dir: artifacts/member1/benchmark
+scales: [100000, 300000, 799439]
+repetitions: 3
+partitions: [1, 2, 4]

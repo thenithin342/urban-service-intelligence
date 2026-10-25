@@ -11,3 +11,8 @@ They are provided for Members 2 and 3 so they can develop, test, and render down
 - `spatial_hotspots_sample.json`: Top 10 spatial grid hotspot cells ($\Delta = 0.01^\circ$) with calculated density per $\text{km}^2$.
 
 Full dataset schemas, data types, and contract guarantees are documented in `docs/member1/artifact_contract.md`.
+
+`demand_handoff.json` is a measured six-row Phase 6 consumer example from the
+2024-02-29 historical origin, acquired in the 2026-10-25 snapshot. It contains
+borough totals and descriptive spatial counts, not priority ranks or current
+forecasts. See `docs/member1/demand_contract.md` for its schema and limits.

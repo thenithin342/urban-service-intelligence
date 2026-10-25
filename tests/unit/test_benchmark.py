@@ -1,0 +1,29 @@
+"""Small synthetic input-prefix checks; benchmark findings use real records."""
+
+import csv
+import json
+
+import pytest
+
+from src.evaluation.benchmark import prepare_inputs
+from src.ingestion.downloader import DEFAULT_FIELDS, sha256_file
+
+
+def test_benchmark_prefixes_are_exact_and_do_not_synthesize_rows(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "2024-01-01.csv"
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=DEFAULT_FIELDS)
+        writer.writeheader()
+        for key in ("1", "2", "3"):
+            writer.writerow({"unique_key": key})
+    (source / "manifest.json").write_text(json.dumps({"complete": True, "rows_written": 3,
+        "days": [{"day": "2024-01-01", "sha256": sha256_file(path)}]}))
+    cfg = {"source_dir": "source", "output_dir": "out", "scales": [2, 3]}
+    values = prepare_inputs(cfg, tmp_path)
+    for n, info in values.items():
+        with open(info["path"], newline="", encoding="utf-8") as stream:
+            assert [r["unique_key"] for r in csv.DictReader(stream)] == [str(i) for i in range(1, n + 1)]
+    with pytest.raises(ValueError, match="scales"):
+        prepare_inputs({**cfg, "scales": [4]}, tmp_path)
