@@ -459,8 +459,9 @@ def time_coverage(
         "coverage_ratio": span_completeness,  # retained for backwards compatibility
     }
     if ingestion_meta:
-        if "row_count" in ingestion_meta:
-            out["ingestion_row_count"] = int(ingestion_meta["row_count"])
+        ingestion_rows = ingestion_meta.get("rows_written", ingestion_meta.get("row_count"))
+        if ingestion_rows is not None:
+            out["ingestion_row_count"] = int(ingestion_rows)
         if "where" in ingestion_meta:
             out["ingestion_filter"] = str(ingestion_meta["where"])
     return out

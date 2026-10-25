@@ -7,6 +7,7 @@ safety limits, not source-record sampling.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 MEMBER1_DEFAULTS: dict[str, Any] = {
@@ -57,6 +58,10 @@ def member1_config(cfg: dict[str, Any]) -> dict[str, Any]:
     out["kmeans_variant"] = str(out["kmeans_variant"])
     for key in _POSITIVE_INTS:
         out[key] = int(out[key])
+    if not all(math.isfinite(out[key]) for key in (
+        "grid_cell_deg", "dbscan_eps_meters", "projection_lat0", "projection_lon0"
+    )) or not all(math.isfinite(e) for e in out["dbscan_eps_grid"]):
+        raise ValueError("member1 geographic parameters must be finite")
     if out["grid_cell_deg"] <= 0:
         raise ValueError("member1.grid_cell_deg must be > 0")
     if out["dbscan_eps_meters"] <= 0:

@@ -39,6 +39,14 @@ Parquet to `data/processed/member1_history`, and verifies the readback count.
 The schema stays identical to `docs/data_dictionary.md`. The output is overwritten
 on a rerun; sample Parquet remains in `data/processed/nyc311_clean`.
 
+Publication first writes and checks a sibling staging directory. A write or
+readback failure leaves the previous history output intact. The captured source
+manifest hash must still match before publication; acquisition and ETL must run
+sequentially. Invalid UTC acquisition timestamps and inconsistent source/date or
+monthly metadata fail before Spark transformations. CSV parsing supports quoted
+newlines and the doubled quotes emitted by the download writer.
+Only one ETL writer may publish to a given output directory at a time.
+
 `data_snapshot_date` is the UTC acquisition date for each daily checkpoint,
 not the complaint event date or the ETL run date. It describes current observed
 status/closure values; those values are not valid historical forecast features.
@@ -46,6 +54,16 @@ The quality report is `artifacts/member1/phase4/etl_quality.json`, with provenan
 hash, snapshot dates, daily/monthly counts, missing-day check and quality flags.
 No new dashboard tables are introduced. Members 2/3 can read these cleaned
 records or rerun their own aggregates under the existing schema.
+
+To run analytics on this expanded input, explicitly select its provenance:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_member1_analytics.py --config configs/sample.yaml --input data/processed/member1_history --ingestion-manifest data/raw/member1_history/manifest.json --outdir artifacts/member1/analytics_history
+```
+
+An overridden input without an explicit manifest does not inherit the sample's
+provenance. Sparse geographic inputs retain nullable `cluster: int` values and
+typed ablation rows; `cluster_summary` is omitted when clustering is unavailable.
 
 ## Verification
 

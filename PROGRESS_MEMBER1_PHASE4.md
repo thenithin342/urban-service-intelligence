@@ -137,3 +137,12 @@ not historical status trajectories. See `docs/member1/history_contract.md`.
 | 8 | Member 1 final methodology, evidence and reproducibility audit |
 
 No forecasting accuracy or benchmark performance is claimed in Phase 4.
+
+## Pre-merge follow-up audit (2026-10-25)
+
+See `reports/member1/premerge_audit.md` for the complete follow-up audit, nine
+resolved findings and real end-to-end verification on the 100k sample, 799,439
+historical records and a fresh two-page 9,026-record download. The full regression
+run passed 85 tests; a final unit pass after the last plotting/configuration
+fixes passed 55 tests. Lint passed. Environment and sandbox limitations are
+recorded explicitly. No merge into main was performed.

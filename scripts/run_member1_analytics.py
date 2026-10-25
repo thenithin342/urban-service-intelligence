@@ -12,6 +12,7 @@ Optional:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import numpy as np
+from pyspark.sql import functions as F
 
 from src.analytics import clustering, figures, geospatial, spark_eda
 from src.analytics.member1_config import member1_config
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--input", default=None, help="Override cleaned Parquet path")
     ap.add_argument("--outdir", default=None, help="Override analytics output dir")
     ap.add_argument("--no-figures", action="store_true", help="Skip figure generation")
+    ap.add_argument("--ingestion-manifest", default=None, help="Manifest for an overridden input")
     ap.add_argument("--master", default="local[2]")
     args = ap.parse_args(argv)
 
@@ -77,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
         return 3
+    if args.ingestion_manifest and not resolve_path(ROOT, args.ingestion_manifest).is_file():
+        ap.error("--ingestion-manifest must reference an existing JSON file")
 
     spark = get_spark("member1-phase3", master=args.master)
     try:
@@ -87,15 +92,21 @@ def main(argv: list[str] | None = None) -> int:
             print("[member1] BLOCKER: cleaned table is empty", flush=True)
             return 3
 
-        manifest_path = resolve_path(
-            ROOT, cfg.get("out_manifest", "data/manifests/manifest_sample.json")
+        manifest_path = (
+            resolve_path(ROOT, args.ingestion_manifest) if args.ingestion_manifest
+            else (None if args.input else resolve_path(
+                ROOT, cfg.get("out_manifest", "data/manifests/manifest_sample.json")))
         )
         ingestion_meta = None
-        if manifest_path.exists():
+        manifest_hash = None
+        if manifest_path is not None and manifest_path.exists():
             try:
-                with open(manifest_path, "r", encoding="utf-8") as f:
-                    ingestion_meta = json.load(f)
+                manifest_bytes = manifest_path.read_bytes()
+                ingestion_meta = json.loads(manifest_bytes)
+                manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
             except (OSError, json.JSONDecodeError):
+                if args.ingestion_manifest:
+                    raise
                 ingestion_meta = None
         coverage = spark_eda.time_coverage(df, ingestion_meta=ingestion_meta)
         geo_quality = geospatial.geo_quality_summary(df)
@@ -139,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         ablation = clustering.preprocessing_ablation(
             cells, m1["kmeans_k_values"], m1["kmeans_seed"]
         )
-        ablation_sdf = spark.createDataFrame(ablation or [{"variant": "none"}])
+        ablation_sdf = spark.createDataFrame(ablation, schema=clustering.ABLATION_SCHEMA)
         table_meta["kmeans_ablation"] = _write_table(
             ablation_sdf, tables_dir / "kmeans_ablation"
         )
@@ -171,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             cluster_pd = None
             chosen = {"variant": None, "n_cells": int(n_cells), "k_metrics": []}
-            cells_assigned = cells
+            cells_assigned = cells.withColumn("cluster", F.lit(None).cast("int"))
 
         table_meta["spatial_grid_cells"] = _write_table(
             cells_assigned.drop(
@@ -182,7 +193,9 @@ def main(argv: list[str] | None = None) -> int:
         cells_pd = spark_eda.bounded_pandas(cells_assigned, cap)
 
         if cluster_pd is not None and len(cluster_pd):
-            cs_sdf = spark.createDataFrame(cluster_pd)
+            cs_sdf = spark.createDataFrame(
+                cluster_pd, schema=clustering.CLUSTER_SUMMARY_SCHEMA
+            ).replace(float("nan"), None, subset=["mean_resolution_hours"])
             table_meta["cluster_summary"] = _write_table(
                 cs_sdf, tables_dir / "cluster_summary"
             )
@@ -223,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             hist_pd = hist_sdf.toPandas()
             box_pd = box_sdf.toPandas()
             iqr = box_pd["q3"] - box_pd["q1"]
-            box_pd["whislo"] = np.maximum(0.1, box_pd["q1"] - 1.5 * iqr)
+            box_pd["whislo"] = np.maximum(box_pd["min_hours"], box_pd["q1"] - 1.5 * iqr)
             box_pd["whishi"] = np.minimum(box_pd["max_hours"], box_pd["q3"] + 1.5 * iqr)
 
             _fig(
@@ -280,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
             "producer_version": producer,
             "config_path": args.config,
             "input_path": str(input_path),
+            "ingestion_manifest_path": str(manifest_path) if ingestion_meta else None,
+            "ingestion_manifest_sha256": manifest_hash,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
             "spark_version": spark.version,
             "verify": verify,

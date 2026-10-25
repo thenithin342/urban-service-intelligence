@@ -259,7 +259,7 @@ def box_resolution_by_borough(
         bxpstats = []
         d = df.sort_values("borough")
         for _, r in d.iterrows():
-            whislo = max(0.1, float(r.get("whislo", r.get("min_hours", 0.1))))
+            whislo = max(0.0, float(r.get("whislo", r.get("min_hours", 0.0))))
             whishi = float(r.get("whishi", r.get("max_hours", r["q3"])))
             bxpstats.append({
                 "label": str(r["borough"]),
@@ -293,8 +293,8 @@ def box_resolution_by_borough(
         worst = labels[int(np.argmax(medians))]
         max_med = max(medians)
 
-    ax.set_yscale("log")
-    ax.set_ylabel("Resolution time (hours, log scale)")
+    ax.set_yscale("symlog", linthresh=0.1)
+    ax.set_ylabel("Resolution time (hours; linear below 0.1 h, log above)")
     ax.set_xlabel("Borough")
     ax.set_title("Resolution time by borough (resolved rows only, outliers hidden)")
     takeaway = (
@@ -465,7 +465,7 @@ def silhouette_curve(
     best = df.loc[df["silhouette"].idxmax()]
     ax.axvline(best["k"], color=_GREY, linestyle="--", linewidth=1)
     ax.set_xlabel("Number of clusters k")
-    ax.set_ylabel("Silhouette score (squared Euclidean on scaled features)")
+    ax.set_ylabel("Silhouette score (squared Euclidean)")
     ax.set_title("KMeans model selection: silhouette vs k")
     takeaway = (
         f"Best silhouette {best['silhouette']:.3f} at k={int(best['k'])}; "
@@ -489,6 +489,9 @@ def cluster_scatter(
 
     fig, ax = plt.subplots(figsize=(8.5, 7.0))
     n_clusters = int(d["cluster"].nunique()) if "cluster" in d.columns else 0
+    cluster_ids = sorted(d["cluster"].dropna().unique())
+    colors = d["cluster"].map({value: i for i, value in enumerate(cluster_ids)})
+    cmap = plt.get_cmap("tab10", max(1, n_clusters))
 
     # If df contains individual grid cells (e.g. 873 cells in spatial_grid_cells)
     if len(d) > 10 or ("spatial_id" in d.columns):
@@ -507,8 +510,10 @@ def cluster_scatter(
             d["center_lon"],
             d["center_lat"],
             s=sizes,
-            c=d["cluster"],
-            cmap="tab10",
+            c=colors,
+            cmap=cmap,
+            vmin=-0.5,
+            vmax=n_clusters - 0.5,
             alpha=0.6,
             edgecolor="none",
             label="Grid cells",
@@ -541,7 +546,7 @@ def cluster_scatter(
         ax.set_title("KMeans spatial clusters: grid cell assignments & centroids")
         takeaway = (
             f"{len(d)} grid cells assigned across {n_clusters} KMeans clusters with "
-            "centroids marked; clusters reflect core vs peripheral demand intensity."
+            "centroids marked; clusters are descriptive reporting-intensity groups, not risk labels."
         )
     else:
         # Fallback when only cluster centers dataframe is passed
@@ -554,8 +559,10 @@ def cluster_scatter(
             d["center_lon"],
             d["center_lat"],
             s=sizes,
-            c=d["cluster"],
-            cmap="tab10",
+            c=colors,
+            cmap=cmap,
+            vmin=-0.5,
+            vmax=n_clusters - 0.5,
             alpha=0.85,
             edgecolor="white",
             linewidth=0.6,
@@ -575,7 +582,8 @@ def cluster_scatter(
             "descriptive reporting-intensity groups, not risk labels."
         )
 
-    fig.colorbar(sc, ax=ax, label="Cluster id")
+    colorbar = fig.colorbar(sc, ax=ax, label="Cluster id", ticks=range(n_clusters))
+    colorbar.ax.set_yticklabels([str(int(value)) for value in cluster_ids])
     ax.set_xlabel("Longitude (deg)")
     ax.set_ylabel("Latitude (deg)")
     return _save(fig, path, period, producer), takeaway

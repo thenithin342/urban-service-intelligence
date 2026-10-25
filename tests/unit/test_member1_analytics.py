@@ -162,7 +162,15 @@ def test_timeseries_daily_distinguishes_partial_day(tmp_path: Path):
     assert "Daily volume across 12 observed days" in t2
 
 
-def test_cluster_scatter_with_grid_cells_and_centers(tmp_path: Path):
+def test_cluster_scatter_with_grid_cells_and_centers(tmp_path: Path, monkeypatch):
+    saved = []
+    original_save = figures._save
+
+    def capture(fig, *args):
+        saved.append(fig)
+        return original_save(fig, *args)
+
+    monkeypatch.setattr(figures, "_save", capture)
     cells = pd.DataFrame(
         {
             "center_lat": [40.71, 40.72, 40.58, 40.59],
@@ -185,6 +193,8 @@ def test_cluster_scatter_with_grid_cells_and_centers(tmp_path: Path):
     )
     assert p is not None and Path(p).exists()
     assert "4 grid cells assigned across 2 KMeans clusters" in t
+    assert saved[0].axes[0].collections[0].cmap.N == 2
+    assert [tick.get_text() for tick in saved[0].axes[-1].get_yticklabels()] == ["0", "1"]
 
 
 def test_hotspot_cell_25_31_queens_geographic_label():
@@ -198,5 +208,32 @@ def test_hotspot_cell_25_31_queens_geographic_label():
     assert round(center_lon, 3) == -73.945
     # Latitude 40.745 is north of Brooklyn (~40.58-40.71) and east of East River in Queens (Long Island City)
     assert center_lat > 40.72  # North of Brooklyn / Queens border
+
+
+def test_zero_duration_boxplot_does_not_invent_positive_whiskers(tmp_path, monkeypatch):
+    captured = []
+    original_save = figures._save
+
+    def capture(fig, *args):
+        captured.append(fig)
+        return original_save(fig, *args)
+
+    monkeypatch.setattr(figures, "_save", capture)
+    frame = pd.DataFrame({"borough": ["QUEENS"], "q1": [0.0], "med": [0.0],
+                          "q3": [0.0], "min_hours": [0.0], "max_hours": [0.0]})
+    path, _ = figures.box_resolution_by_borough(frame, tmp_path / "zero_duration.png")
+    assert path is not None
+    assert captured[0].axes[0].get_yscale() == "symlog"
+    assert all(np.all(line.get_ydata() == 0) for line in captured[0].axes[0].lines)
+
+
+@pytest.mark.parametrize("block", [
+    {"grid_cell_deg": float("nan")},
+    {"dbscan_eps_grid": [float("inf")]},
+    {"projection_lat0": float("nan")},
+])
+def test_nonfinite_geographic_parameters_are_rejected(block):
+    with pytest.raises(ValueError, match="finite"):
+        member1_config({"member1": block})
 
 

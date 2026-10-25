@@ -27,7 +27,7 @@ Metadata and metrics are emitted as machine-readable JSON:
 
 1. **Reporting Semantics:** All complaint counts represent *reported demand volume*, never per-capita defect rates, municipal response failure, or objective neighbourhood hazard.
 2. **Deterministic Aggregation:** Every table is generated via deterministic PySpark grouping with explicit tie-breaking order.
-3. **Null Transparency:** Records with unassigned or unrecognised borough, ZIP code, or complaint categories are preserved explicitly as `"UNKNOWN"` or `null`. Unknown values are never silently redistributed.
+3. **Null Transparency:** Unassigned boroughs and complaint categories remain `null` or `"UNKNOWN"`. ZIP tables explicitly include valid ZIP codes only; excluded invalid/missing ZIP counts are recorded in the quality metrics. Unknown values are never redistributed to valid locations.
 4. **Geographic Scoping:**
    - NYC Bounding Box: Latitude `[40.49, 40.92]`, Longitude `[-74.26, -73.70]`.
    - Spatial tables (`spatial_hotspots`, `spatial_grid_cells`, `cluster_summary`) strictly filter for valid coordinates within this box.
@@ -175,7 +175,7 @@ Metadata and metrics are emitted as machine-readable JSON:
   | `center_lat` | `double` | No | Cell centroid latitude |
   | `center_lon` | `double` | No | Cell centroid longitude |
   | `complaint_count` | `bigint` | No | Total complaints in cell |
-  | `cell_area_km2` | `double` | No | Exact cell area in sq km (accounting for latitude) |
+  | `cell_area_km2` | `double` | No | Approximate cell area in sq km using latitude-dependent degree widths |
   | `density_per_km2` | `double` | No | Density: `complaint_count / cell_area_km2` |
 
 ### 3.13. `zip_hotspots`
@@ -203,7 +203,7 @@ Metadata and metrics are emitted as machine-readable JSON:
   | `dominant_complaint` | `string` | Yes | Most frequent complaint category |
   | `x_m` | `double` | No | Tangent plane projected easting (metres) |
   | `y_m` | `double` | No | Tangent plane projected northing (metres) |
-  | `cluster` | `bigint` | Yes | KMeans primary cluster assignment (`0`=Core, `1`=Periphery) |
+  | `cluster` | `int` | Yes | KMeans primary cluster assignment; null when clustering is unavailable |
 
 ### 3.15. `kmeans_ablation`
 - **Path:** `artifacts/member1/analytics/tables/kmeans_ablation`
@@ -233,7 +233,7 @@ Metadata and metrics are emitted as machine-readable JSON:
   | `center_x_m` | `double` | No | Cluster centre projected easting (m) |
   | `center_y_m` | `double` | No | Cluster centre projected northing (m) |
   | `mean_complaints_per_cell` | `double` | No | Average complaints per constituent cell |
-  | `mean_resolution_hours` | `double` | No | Exact resolved-record weighted mean resolution duration |
+  | `mean_resolution_hours` | `double` | Yes | Resolved-record weighted mean; null when no resolved records exist |
   | `center_lat` | `double` | No | Cluster centre latitude |
   | `center_lon` | `double` | No | Cluster centre longitude |
   | `dominant_borough` | `string` | Yes | Dominant borough across constituent cells (grid cell plurality) |
@@ -241,7 +241,7 @@ Metadata and metrics are emitted as machine-readable JSON:
 
 > [!IMPORTANT]
 > **Cluster ID Stability Notice for Downstream Consumers (Member 3):**
-> Unsupervised KMeans cluster integer labels (`cluster: 0, 1`) are assigned dynamically by PySpark MLlib during centroid optimization. **Cluster IDs are not guaranteed to retain the exact same semantic identity (e.g. Core vs Periphery) across retraining runs, differing random seeds, or expanded historical data windows.** Member 3 dashboards and downstream modeling components must join on `spatial_id` or query `cluster_summary` attributes (such as `mean_complaints_per_cell`, `cells`, or centroid coordinates) to interpret cluster characteristics dynamically, rather than hardcoding business logic to `cluster == 0`. The schemas of `spatial_grid_cells` (including `cluster: bigint`) and `cluster_summary` remain fully backwards compatible with Member 3 requirements.
+> Unsupervised KMeans cluster integer labels (`cluster: 0, 1`) are assigned dynamically by PySpark MLlib during centroid optimization. **Cluster IDs are not guaranteed to retain the exact same semantic identity (e.g. Core vs Periphery) across retraining runs, differing random seeds, or expanded historical data windows.** Member 3 dashboards and downstream modeling components must join on `spatial_id` or query `cluster_summary` attributes (such as `mean_complaints_per_cell`, `cells`, or centroid coordinates) to interpret cluster characteristics dynamically, rather than hardcoding business logic to `cluster == 0`. The actual Spark type is `int` in `spatial_grid_cells` and `bigint` in the Pandas-derived `cluster_summary`. The earlier `bigint` declaration for both tables was a documentation error.
 
 ---
 

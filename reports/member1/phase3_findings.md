@@ -108,7 +108,7 @@ Phase 3 implements distributed big-data exploratory analytics, deterministic spa
 - We apply a fixed degree grid with cell size $\Delta = 0.01^\circ$ (approximately 1.11 km in latitude and ~0.84 km in longitude at NYC's latitude).
 - Grid cell identification is deterministic:
   $$\text{row} = \left\lfloor \frac{\text{lat} - 40.49}{0.01} \right\rfloor, \quad \text{col} = \left\lfloor \frac{\text{lon} - (-74.26)}{0.01} \right\rfloor, \quad \text{spatial\_id} = \text{row}:\text{col}$$
-- **Area Normalization:** Because longitude degree width varies with latitude according to $\cos(\text{lat})$, the true physical area of each cell is computed individually:
+- **Area Normalization:** Because longitude degree width varies with latitude according to $\cos(\text{lat})$, the physical area of each cell is approximated individually using degree-width constants. This is not an exact geodesic area:
   $$\text{Area}_{\text{cell}} = (\Delta \cdot 110.574\text{ km}) \times (\Delta \cdot 111.320\text{ km} \cdot \cos(\text{center\_lat}))$$
   NYC grid cells span approximately $0.932 \text{ km}^2$ in the north (Bronx) to $0.938 \text{ km}^2$ in the south (Staten Island).
 - **Hotspot Findings:**

@@ -7,6 +7,7 @@ import pytest
 
 from src.ingestion.downloader import DEFAULT_FIELDS
 from src.ingestion.history import daily_windows, download_history
+from src.processing.history import process_history
 
 
 def config():
@@ -91,3 +92,20 @@ def test_resume_rejects_different_scope(tmp_path, monkeypatch):
     download_history(config(), tmp_path)
     with pytest.raises(ValueError, match="different request"):
         download_history({**config(), "end": "2024-03-02"}, tmp_path)
+
+
+@pytest.mark.parametrize("corruption", ["snapshot", "timezone", "source", "monthly"])
+def test_etl_rejects_invalid_manifest_before_spark(tmp_path, monkeypatch, corruption):
+    mock_source(monkeypatch)
+    manifest = download_history(config(), tmp_path)
+    if corruption == "snapshot":
+        manifest["days"][0]["acquired_at_utc"] = "not-a-date"
+    elif corruption == "timezone":
+        manifest["days"][0]["acquired_at_utc"] = "2026-10-25T12:00:00"
+    elif corruption == "source":
+        manifest["base_url"] = "https://example.test/other-dataset"
+    else:
+        manifest["monthly_rows"]["2024-02"] += 1
+    (tmp_path / "raw/manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError):
+        process_history(config(), tmp_path, None)

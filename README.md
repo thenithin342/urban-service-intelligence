@@ -23,6 +23,9 @@ prototype. Advisory outputs only, NOT a municipal dispatch tool.
   final audit): pending. Mining, closure models and dashboard integration
   belong to Members 2 and 3; their completion is not implied here.
 
+The latest Member 1 end-to-end verification, fixes and known limits are recorded
+in `reports/member1/premerge_audit.md`.
+
 ## Technology stack
 
 Python 3.10, PySpark 3.5.3 (local mode), Java 17, pandas, pyarrow,

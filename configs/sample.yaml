@@ -42,7 +42,6 @@ member1:
   analytics_outdir: artifacts/member1/analytics
   top_categories: 20
   grid_cell_deg: 0.01          # deterministic lat/lon grid cell (~1.1 km lat)
-  projection_epsg: 32618       # UTM zone 18N: metric distances for NYC
   hotspot_min_count: 50        # min complaints per grid cell to report
   kmeans_k_values: [2, 3, 4, 5, 6, 8]
   kmeans_seed: 42

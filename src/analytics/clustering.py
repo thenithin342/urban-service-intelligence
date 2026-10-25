@@ -23,6 +23,15 @@ from pyspark.ml.feature import StandardScaler, VectorAssembler
 from src.analytics.geospatial import cluster_centers_to_latlon
 
 BASE_FEATURES = ["x_m", "y_m"]
+ABLATION_SCHEMA = (
+    "variant string, use_log_count boolean, scaled boolean, k bigint, "
+    "silhouette double, wssse double, note string"
+)
+CLUSTER_SUMMARY_SCHEMA = (
+    "cluster bigint, cells bigint, complaints bigint, center_x_m double, center_y_m double, "
+    "mean_complaints_per_cell double, mean_resolution_hours double, center_lat double, "
+    "center_lon double, dominant_borough string, dominant_complaint string"
+)
 
 
 def _with_log_count(cell_df: Any) -> Any:
@@ -94,7 +103,10 @@ def select_k(
     """Fit each k; return (best predictions by silhouette, metrics list)."""
     results = []
     best_pred, best_sil = None, float("-inf")
-    for k in k_values:
+    n_rows = frame.count()
+    for k in sorted(set(k_values)):
+        if not 2 <= k <= n_rows:
+            continue
         pred, m = evaluate_k(frame, feature_col, k, seed)
         results.append(m)
         if m["silhouette"] > best_sil:
