@@ -211,6 +211,26 @@ def main(argv: list[str] | None = None) -> int:
                     "observed_* from mature labels of the same complaints",
         })
 
+        # Cohort backlog for every model (comparison at the grain Member 3 uses).
+        all_cohorts = pd.concat([
+            res.cohort_predictions(test, preds[name], test_start, test_end,
+                                   MODEL_VERSION_CLOSURE, m2["min_cohort_n"]).assign(model=name)
+            for name in res.MODEL_NAMES], ignore_index=True)
+        write_extra_table(all_cohorts, out_dir / "predictions" / "closure_cohorts_all_models",
+                          {"model_version": MODEL_VERSION_CLOSURE, "selected_model": selected,
+                           "test_window": [test_start, test_end]})
+        diff = all_cohorts["expected_open_after_7d"] - all_cohorts["observed_open_after_7d"]
+        cohort_error = {
+            name: {
+                "mae_open_per_cohort": float(diff[all_cohorts["model"] == name].abs().mean()),
+                "total_bias_open": float(diff[all_cohorts["model"] == name].sum()),
+                "mae_open_cohorts_n_ge_min": float(diff[(all_cohorts["model"] == name)
+                                                        & ~all_cohorts["small_sample"]]
+                                                   .abs().mean()),
+            }
+            for name in res.MODEL_NAMES
+        }
+
         cal = pd.concat([
             mm.calibration_table(test["closed_within_7d"], preds[name]).assign(model=name)
             for name in res.MODEL_NAMES], ignore_index=True)
@@ -242,11 +262,15 @@ def main(argv: list[str] | None = None) -> int:
         write_extra_table(stab_c, out_dir / "tables" / "stability_by_category",
                           {**meta_t, "model": selected})
 
+        # Explanation: permutation importance of the best *learned* model by
+        # validation Brier (baselines have no features to explain).
+        learned = [m for m in res.MODEL_NAMES if m not in res.BASELINES]
+        explained = min(learned, key=lambda k: (val_brier[k], k))
         importance = None
-        if not args.no_importance and selected not in res.BASELINES:
-            importance = _importance(models[selected], test, seed)
+        if not args.no_importance:
+            importance = _importance(models[explained], test, seed)
             write_extra_table(importance, out_dir / "tables" / "feature_importance",
-                              {**meta_t, "model": selected,
+                              {**meta_t, "model": explained,
                                "method": "permutation importance, neg Brier, 3 repeats, "
                                          "<=20000 test rows"})
         model_dir = out_dir / "models"
@@ -290,6 +314,8 @@ def main(argv: list[str] | None = None) -> int:
                 "expected_open_total": float(cohorts["expected_open_after_7d"].sum()),
                 "observed_open_total": float(cohorts["observed_open_after_7d"].sum()),
             },
+            "cohort_backlog_error": cohort_error,
+            "explained_model": explained,
             "leakage": leakage,
             "feature_importance": None if importance is None else importance.head(12).to_dict(
                 orient="records"),
