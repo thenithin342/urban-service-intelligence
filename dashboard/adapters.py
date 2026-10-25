@@ -420,7 +420,7 @@ def cleaned_inputs() -> list[dict[str, Any]]:
                 "ready": success.is_file(),
                 "coverage_end": end,
                 "written_at": (
-                    datetime.fromtimestamp(success.stat().st_mtime, tz=timezone.utc)  # noqa: UP017
+                    datetime.fromtimestamp(success.stat().st_mtime, tz=timezone.utc)
                     if success.is_file()
                     else None
                 ),

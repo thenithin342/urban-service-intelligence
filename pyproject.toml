@@ -13,8 +13,10 @@ extend-ignore = ["E501"]  # Pre-existing long lines are not regressions; enforce
 "tests/**" = ["DTZ001", "DTZ007", "E501"]
 # date.today() fallback for snapshot label; timezone-awareness not required here.
 "src/processing/clean.py" = ["DTZ011"]
-# Scripts do sys.path.insert() before local imports (required for standalone CLI).
+# Scripts and dashboard views/adapters do sys.path.insert() before local
+# imports (required for standalone CLI and Streamlit page loading).
 "scripts/**" = ["E402"]
+"dashboard/**" = ["E402"]
 
 [tool.pytest.ini_options]
 # IMPORTANT: always invoke via .venv\Scripts\python.exe -m pytest
