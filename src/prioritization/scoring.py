@@ -125,6 +125,32 @@ def binned_median(bins: pd.Series, counts: pd.Series) -> float:
     return float(HOUR_EDGES[int(df["b"].iloc[-1])])
 
 
+def grouped_binned_median(hist: pd.DataFrame) -> pd.DataFrame:
+    """Vectorized binned_median per unit: KEYS, delay_value, delay_records."""
+    cols = [*KEYS, "delay_value", "delay_records"]
+    if hist.empty:
+        return pd.DataFrame(columns=cols)
+    h = (
+        hist.groupby([*KEYS, "hours_bin"], as_index=False)["n"].sum()
+        .sort_values([*KEYS, "hours_bin"], kind="mergesort")
+    )
+    h["n"] = h["n"].astype(float)
+    h["cum"] = h.groupby(KEYS)["n"].cumsum()
+    h["total"] = h.groupby(KEYS)["n"].transform("sum")
+    hit = h[h["cum"] >= h["total"] / 2.0].groupby(KEYS, as_index=False).first()
+    edges = np.asarray(HOUR_EDGES)
+    b = hit["hours_bin"].astype(int).to_numpy()
+    lo, hi = edges[b], edges[b + 1]
+    prev = (hit["cum"] - hit["n"]).to_numpy()
+    with np.errstate(invalid="ignore"):
+        frac = (hit["total"].to_numpy() / 2.0 - prev) / hit["n"].to_numpy()
+        val = np.where(np.isinf(hi), lo, lo + (hi - lo) * frac)
+    out = hit[KEYS].copy()
+    out["delay_value"] = val.astype(float)
+    out["delay_records"] = hit["total"].astype(int).to_numpy()
+    return out[cols]
+
+
 def window_bounds(window_end: date, window_days: int) -> tuple[date, date, date]:
     """(window_start, window_end, cutoff) with cutoff = window_end + 1 day."""
     if window_days < 1:
@@ -171,13 +197,7 @@ def observed_components(
         if cfg.delay_lookback_days:
             keep &= d["closed_day"] >= cutoff - timedelta(days=int(cfg.delay_lookback_days))
         d = d[keep]
-    if d.empty:
-        med = pd.DataFrame(columns=[*KEYS, "delay_value", "delay_records"])
-    else:
-        rows = []
-        for (loc, ctype), g in d.groupby(KEYS, sort=True):
-            rows.append((loc, ctype, binned_median(g["hours_bin"], g["n"]), int(g["n"].sum())))
-        med = pd.DataFrame(rows, columns=[*KEYS, "delay_value", "delay_records"])
+    med = grouped_binned_median(d.merge(units[KEYS], on=KEYS, how="inner"))
     units = units.merge(med, on=KEYS, how="left")
     units["delay_records"] = pd.to_numeric(units["delay_records"]).fillna(0).astype(int)
     units.loc[units["delay_records"] < cfg.min_delay_records, "delay_value"] = np.nan

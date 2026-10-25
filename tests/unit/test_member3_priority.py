@@ -127,6 +127,24 @@ def test_binned_median_interpolates_within_bin():
     assert scoring.binned_median(top, pd.Series([3])) == 8760.0
 
 
+def test_grouped_binned_median_matches_scalar():
+    rng = np.random.default_rng(3)
+    hist = pd.DataFrame(
+        {
+            "location": rng.choice(["A", "B", "C"], 200),
+            "complaint_type": rng.choice(["x", "y"], 200),
+            "hours_bin": rng.integers(0, len(scoring.HOUR_EDGES) - 1, 200),
+            "n": rng.integers(1, 9, 200),
+        }
+    )
+    got = scoring.grouped_binned_median(hist).set_index(["location", "complaint_type"])
+    for key, g in hist.groupby(["location", "complaint_type"]):
+        assert got.loc[key, "delay_value"] == pytest.approx(
+            scoring.binned_median(g["hours_bin"], g["n"])
+        )
+        assert got.loc[key, "delay_records"] == g["n"].sum()
+
+
 def test_hours_bin_edges():
     b = scoring.hours_bin(pd.Series([0.0, 0.49, 0.5, 24.0, 8760.0]))
     assert b.tolist() == [0, 0, 1, scoring.HOUR_EDGES.index(24.0), len(scoring.HOUR_EDGES) - 2]
