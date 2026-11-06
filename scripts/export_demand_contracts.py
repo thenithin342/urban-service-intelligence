@@ -315,12 +315,20 @@ def safe_publish_contract(
             shutil.copy2(staged_meta, target_meta)
         except Exception:
             # Restore backup if copy failed
-            if backup_dir.exists():
+            if backup_dir.exists() and list(backup_dir.glob("*")):
+                for old in target_dir.glob("*.parquet"):
+                    old.unlink()
                 for b in backup_dir.glob("*.parquet"):
                     shutil.copy2(b, target_dir / b.name)
                 b_meta = backup_dir / target_meta.name
                 if b_meta.is_file():
                     shutil.copy2(b_meta, target_meta)
+            else:
+                # First-time publication failed midway: clear partial files
+                for partial in target_dir.glob("*.parquet"):
+                    partial.unlink()
+                if target_meta.is_file():
+                    target_meta.unlink()
             raise
         finally:
             if backup_dir.exists():

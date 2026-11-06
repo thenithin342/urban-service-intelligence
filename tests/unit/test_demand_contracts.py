@@ -6,7 +6,9 @@ ASCII only.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -348,4 +350,159 @@ def test_build_forecast_table_rejects_invalid_borough(tmp_path: Path):
 
     with pytest.raises(ValueError, match="unexpected borough values"):
         build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
+
+
+def test_demand_forecast_prevents_double_counting_and_separates_totals():
+    """Verify that complaint_type=ALL totals and category subsets are not naively summed.
+
+    Citywide total demand must be computed exclusively from complaint_type='ALL' rows.
+    Named categories represent modeled subsets of those borough totals.
+    """
+    fc = ad.load_contract("demand_forecast", allow_fixture=False)
+    df = fc.df
+
+    all_rows = df[df["complaint_type"] == "ALL"]
+    cat_rows = df[df["complaint_type"] != "ALL"]
+
+    # 1. Total rows check: 42 ALL rows (6 geographies x 7 horizons) and 105 category rows (15 pairs x 7 horizons)
+    assert len(all_rows) == 42
+    assert len(cat_rows) == 105
+    assert len(df) == 147
+
+    # 2. Strict total checks
+    # True citywide forecast volume (ALL rows only): exactly 58,260.0
+    total_citywide_all = all_rows["predicted_count"].sum()
+    assert total_citywide_all == 58260.0
+
+    # Category subset total: 21,016.0
+    total_categories = cat_rows["predicted_count"].sum()
+    assert total_categories == 21016.0
+
+    # Naive sum of the entire table would yield 79,276.0 which is a double count
+    naive_sum = df["predicted_count"].sum()
+    assert naive_sum == total_citywide_all + total_categories
+
+    # 3. For every borough with categories, the category sum must not exceed the borough ALL total
+    for borough in ["BRONX", "BROOKLYN", "MANHATTAN", "QUEENS", "STATEN ISLAND"]:
+        b_all = all_rows[all_rows["borough"] == borough]["predicted_count"].sum()
+        b_cat = cat_rows[cat_rows["borough"] == borough]["predicted_count"].sum()
+        assert b_cat > 0.0
+        assert b_cat < b_all, f"Categories in {borough} ({b_cat}) must be a proper subset of ALL ({b_all})"
+
+
+def test_safe_publish_simulated_write_failure_restores_backup(tmp_path: Path):
+    """Verify that an interrupted publication restores pre-existing valid files."""
+    initial_df = pd.DataFrame(
+        {
+            "forecast_date": ["2024-03-01"],
+            "borough": ["QUEENS"],
+            "complaint_type": ["ALL"],
+            "predicted_count": [100.0],
+            "training_cutoff": ["2024-02-29"],
+            "model_version": ["v1"],
+        }
+    )
+    initial_meta = {
+        "producer": "member1",
+        "coverage_start": "2024-03-01",
+        "coverage_end": "2024-03-01",
+        "note": "original_export",
+    }
+    published_dir = safe_publish_contract(initial_df, initial_meta, tmp_path, "demand_forecast")
+    target_meta_file = contracts.manifest_path(tmp_path, "demand_forecast")
+
+    # Second export attempt that simulates an exception during copy2 to destination
+    second_df = initial_df.copy()
+    second_df["predicted_count"] = [999.0]
+    second_meta = dict(initial_meta, note="failed_export")
+
+    real_copy2 = shutil.copy2
+    call_count = 0
+
+    def fail_on_second_copy(src, dst, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        # Allow staged writes, but fail when copying to target meta
+        if str(dst) == str(target_meta_file):
+            raise IOError("Simulated disk error during meta copy")
+        return real_copy2(src, dst, **kwargs)
+
+    with patch("shutil.copy2", side_effect=fail_on_second_copy):
+        with pytest.raises(IOError, match="Simulated disk error"):
+            safe_publish_contract(second_df, second_meta, tmp_path, "demand_forecast")
+
+    # Target directory and meta must still contain the ORIGINAL valid data, not the failed export
+    restored_df = pd.read_parquet(published_dir / "part-00000.parquet")
+    assert restored_df["predicted_count"].iloc[0] == 100.0
+    restored_meta = json.loads(target_meta_file.read_text())
+    assert restored_meta["note"] == "original_export"
+
+
+def test_safe_publish_first_time_failure_leaves_no_orphans(tmp_path: Path):
+    """Verify that a first-time publication failure leaves no partial parquet or meta files."""
+    df = pd.DataFrame(
+        {
+            "forecast_date": ["2024-03-01"],
+            "borough": ["QUEENS"],
+            "complaint_type": ["ALL"],
+            "predicted_count": [100.0],
+            "training_cutoff": ["2024-02-29"],
+            "model_version": ["v1"],
+        }
+    )
+    meta = {
+        "producer": "member1",
+        "coverage_start": "2024-03-01",
+        "coverage_end": "2024-03-01",
+    }
+    target_dir = contracts.contract_path(tmp_path, "demand_forecast")
+    target_meta = contracts.manifest_path(tmp_path, "demand_forecast")
+
+    real_copy2 = shutil.copy2
+
+    def fail_on_meta_copy(src, dst, **kwargs):
+        if str(dst) == str(target_meta):
+            raise IOError("Simulated failure copying meta")
+        return real_copy2(src, dst, **kwargs)
+
+    with patch("shutil.copy2", side_effect=fail_on_meta_copy):
+        with pytest.raises(IOError, match="Simulated failure copying meta"):
+            safe_publish_contract(df, meta, tmp_path, "demand_forecast")
+
+    # Neither partial parquet nor orphaned meta should remain
+    assert not list(target_dir.glob("*.parquet"))
+    assert not target_meta.exists()
+
+
+def test_incomplete_output_is_classified_as_invalid_never_real(tmp_path: Path):
+    """Verify dashboard adapter marks missing meta or partial output as INVALID, never REAL."""
+    import os
+
+    target_dir = contracts.contract_path(tmp_path, "demand_forecast")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    dummy_df = pd.DataFrame(
+        {
+            "forecast_date": ["2024-03-01"],
+            "borough": ["QUEENS"],
+            "complaint_type": ["ALL"],
+            "predicted_count": [100.0],
+            "training_cutoff": ["2024-02-29"],
+            "model_version": ["v1"],
+        }
+    )
+    # Write only parquet, without sibling .meta.json
+    dummy_df.to_parquet(target_dir / "part-00000.parquet")
+
+    old_root = os.environ.get("USI_ROOT")
+    os.environ["USI_ROOT"] = str(tmp_path)
+    try:
+        res = ad.load_contract("demand_forecast", allow_fixture=False)
+        assert res.source == ad.INVALID
+        assert any("missing sibling meta" in p for p in res.problems)
+    finally:
+        if old_root is not None:
+            os.environ["USI_ROOT"] = old_root
+        else:
+            os.environ.pop("USI_ROOT", None)
+
 
