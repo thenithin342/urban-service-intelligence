@@ -103,3 +103,12 @@ eligible borough. ALL rows reconcile with the complete source population;
 category rows must not be added to ALL when reconciling source or spatial totals.
 Forecasts are estimated per series and are not hierarchically reconciled; a
 consumer must choose one grain rather than assume category predictions add to ALL.
+
+## Shared integration contracts export
+
+`scripts/export_demand_contracts.py` publishes:
+- `artifacts/member1/forecasts/tables/demand_forecast`
+- `artifacts/member1/forecasts/tables/demand_metrics`
+with sibling `.meta.json` manifests. Inputs are validated fail-closed in memory
+and staged before publishing to ensure no partial or corrupted states. Shared
+dashboard adapters load both tables with `source == 'real'`.

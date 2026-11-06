@@ -79,18 +79,20 @@ borough x complaint_type over a stated prediction window:
 `prediction_window_start`, `prediction_window_end`, `model_version`.
 This is the backlog input to the priority score.
 
-### 2.3 Member 1 (A) - demand forecasts (pending)
+### 2.3 Member 1 (A) - demand forecasts
 
 `artifacts/member1/forecasts/tables/demand_forecast` - grain
 forecast_date x borough x complaint_type: `forecast_date`, `borough?`,
 `complaint_type`, `predicted_count`, `training_cutoff`, `model_version`.
+Exported via `scripts/export_demand_contracts.py` from verified historical model
+artifacts. Each series spans seven consecutive horizons from the historical
+forecast origin; complaint_type=ALL totals and individual complaint categories
+coexist without hierarchical collapse.
 
 `artifacts/member1/forecasts/tables/demand_metrics` - `model`, `mae`,
 `rmse`, `wape?` (null when the denominator is zero), `eval_start`,
-`eval_end`, `model_version`.
-
-Until Member 1 publishes these, the dashboard shows the fixture with a
-fixture label and the priority score uses trailing observed demand.
+`eval_end`, `model_version`. Contains chronological holdout evaluation metrics
+across candidate models on the test split.
 
 ### 2.4 Member 3 (C) - prioritization
 
