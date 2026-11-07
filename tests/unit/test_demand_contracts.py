@@ -394,6 +394,182 @@ def test_build_forecast_table_rejects_invalid_borough(tmp_path: Path):
         build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
 
 
+def test_build_forecast_table_rejects_observed_future_labels(tmp_path: Path):
+    """Verify table builder rejects future split rows that contain observed actual labels."""
+    future_dir = tmp_path / "future"
+    future_dir.mkdir(parents=True, exist_ok=True)
+    dates = pd.date_range("2024-03-01", periods=7).astype(str)
+    bad_labels = pd.DataFrame(
+        {
+            "forecast_origin": ["2024-02-29"] * 7,
+            "target_date": dates,
+            "borough": ["QUEENS"] * 7,
+            "complaint_type": ["ALL"] * 7,
+            "horizon_days": list(range(1, 8)),
+            "actual_count": [15] * 7,  # leaked future labels!
+            "predicted_count": [10.0] * 7,
+            "raw_prediction": [10.0] * 7,
+            "model": ["seasonal_naive"] * 7,
+            "model_version": ["v1"] * 7,
+            "fit_cutoff": ["2024-02-29"] * 7,
+            "split": ["future"] * 7,
+        }
+    )
+    bad_labels.to_parquet(future_dir / "part.parquet")
+    manifest = {"selected_model": "seasonal_naive"}
+    cfg = {"input_parquet": "x"}
+    with pytest.raises(ValueError, match="missing future labels guard"):
+        build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
+
+
+def test_build_forecast_table_rejects_non_uniform_origins_and_cutoffs(tmp_path: Path):
+    """Verify table builder rejects non-uniform forecast origins or fit cutoffs."""
+    future_dir = tmp_path / "future"
+    future_dir.mkdir(parents=True, exist_ok=True)
+    dates = pd.date_range("2024-03-01", periods=7).astype(str)
+
+    # 1. Non-uniform forecast origins
+    mixed_origins = pd.DataFrame(
+        {
+            "forecast_origin": ["2024-02-29"] * 6 + ["2024-03-01"],
+            "target_date": dates,
+            "borough": ["QUEENS"] * 7,
+            "complaint_type": ["ALL"] * 7,
+            "horizon_days": list(range(1, 8)),
+            "actual_count": [None] * 7,
+            "predicted_count": [10.0] * 7,
+            "raw_prediction": [10.0] * 7,
+            "model": ["seasonal_naive"] * 7,
+            "model_version": ["v1"] * 7,
+            "fit_cutoff": ["2024-02-29"] * 7,
+            "split": ["future"] * 7,
+        }
+    )
+    mixed_origins.to_parquet(future_dir / "part.parquet")
+    manifest = {"selected_model": "seasonal_naive"}
+    cfg = {"input_parquet": "x"}
+    with pytest.raises(ValueError, match="forecast_origin must be uniform"):
+        build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
+
+    # 2. Non-uniform fit cutoffs
+    mixed_cutoffs = pd.DataFrame(
+        {
+            "forecast_origin": ["2024-02-29"] * 7,
+            "target_date": dates,
+            "borough": ["QUEENS"] * 7,
+            "complaint_type": ["ALL"] * 7,
+            "horizon_days": list(range(1, 8)),
+            "actual_count": [None] * 7,
+            "predicted_count": [10.0] * 7,
+            "raw_prediction": [10.0] * 7,
+            "model": ["seasonal_naive"] * 7,
+            "model_version": ["v1"] * 7,
+            "fit_cutoff": ["2024-02-29"] * 6 + ["2024-01-31"],
+            "split": ["future"] * 7,
+        }
+    )
+    mixed_cutoffs.to_parquet(future_dir / "part.parquet")
+    with pytest.raises(ValueError, match="fit_cutoff must be uniform"):
+        build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
+
+
+def test_build_forecast_table_rejects_manifest_coverage_mismatch(tmp_path: Path):
+    """Verify table builder rejects forecast origin differing from manifest coverage end."""
+    future_dir = tmp_path / "future"
+    future_dir.mkdir(parents=True, exist_ok=True)
+    dates = pd.date_range("2024-03-01", periods=7).astype(str)
+    df = pd.DataFrame(
+        {
+            "forecast_origin": ["2024-02-29"] * 7,
+            "target_date": dates,
+            "borough": ["QUEENS"] * 7,
+            "complaint_type": ["ALL"] * 7,
+            "horizon_days": list(range(1, 8)),
+            "actual_count": [None] * 7,
+            "predicted_count": [10.0] * 7,
+            "raw_prediction": [10.0] * 7,
+            "model": ["seasonal_naive"] * 7,
+            "model_version": ["v1"] * 7,
+            "fit_cutoff": ["2024-02-29"] * 7,
+            "split": ["future"] * 7,
+        }
+    )
+    df.to_parquet(future_dir / "part.parquet")
+    manifest = {
+        "selected_model": "seasonal_naive",
+        "coverage": {"end": "2024-03-15"},  # mismatch with 2024-02-29
+    }
+    cfg = {"input_parquet": "x"}
+    with pytest.raises(ValueError, match="does not match manifest coverage end"):
+        build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
+
+
+def test_build_forecast_table_rejects_non_uniform_model_version(tmp_path: Path):
+    """Verify table builder rejects multiple model versions in future prediction rows."""
+    future_dir = tmp_path / "future"
+    future_dir.mkdir(parents=True, exist_ok=True)
+    dates = pd.date_range("2024-03-01", periods=7).astype(str)
+    mixed_versions = pd.DataFrame(
+        {
+            "forecast_origin": ["2024-02-29"] * 7,
+            "target_date": dates,
+            "borough": ["QUEENS"] * 7,
+            "complaint_type": ["ALL"] * 7,
+            "horizon_days": list(range(1, 8)),
+            "actual_count": [None] * 7,
+            "predicted_count": [10.0] * 7,
+            "raw_prediction": [10.0] * 7,
+            "model": ["seasonal_naive"] * 7,
+            "model_version": ["v1"] * 6 + ["v2"],
+            "fit_cutoff": ["2024-02-29"] * 7,
+            "split": ["future"] * 7,
+        }
+    )
+    mixed_versions.to_parquet(future_dir / "part.parquet")
+    manifest = {"selected_model": "seasonal_naive"}
+    cfg = {"input_parquet": "x"}
+    with pytest.raises(ValueError, match="model_version must be uniform"):
+        build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
+
+
+def test_build_forecast_table_rejects_inconsistent_horizon_to_date_mapping(tmp_path: Path):
+    """Verify table builder rejects target dates that do not match origin + horizon_days."""
+    future_dir = tmp_path / "future"
+    future_dir.mkdir(parents=True, exist_ok=True)
+    bad_dates = [
+        "2024-03-01",
+        "2024-03-02",
+        "2024-03-10",  # wrong date for horizon 3 from 2024-02-29!
+        "2024-03-04",
+        "2024-03-05",
+        "2024-03-06",
+        "2024-03-07",
+    ]
+    df = pd.DataFrame(
+        {
+            "forecast_origin": ["2024-02-29"] * 7,
+            "target_date": bad_dates,
+            "borough": ["QUEENS"] * 7,
+            "complaint_type": ["ALL"] * 7,
+            "horizon_days": list(range(1, 8)),
+            "actual_count": [None] * 7,
+            "predicted_count": [10.0] * 7,
+            "raw_prediction": [10.0] * 7,
+            "model": ["seasonal_naive"] * 7,
+            "model_version": ["v1"] * 7,
+            "fit_cutoff": ["2024-02-29"] * 7,
+            "split": ["future"] * 7,
+        }
+    )
+    df.to_parquet(future_dir / "part.parquet")
+    manifest = {"selected_model": "seasonal_naive"}
+    cfg = {"input_parquet": "x"}
+    with pytest.raises(
+        ValueError, match="target_date does not match forecast_origin \\+ horizon_days mapping"
+    ):
+        build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
+
+
 @pytest.mark.skipif(
     not _published_demand_contracts_present(),
     reason="demand contracts not exported in this checkout (run export_demand_contracts.py first)",

@@ -110,5 +110,9 @@ consumer must choose one grain rather than assume category predictions add to AL
 - `artifacts/member1/forecasts/tables/demand_forecast`
 - `artifacts/member1/forecasts/tables/demand_metrics`
 with sibling `.meta.json` manifests. Inputs are validated fail-closed in memory
-and staged before publishing to ensure no partial or corrupted states. Shared
-dashboard adapters load both tables with `source == 'real'`.
+and staged before publishing to ensure no partial or corrupted states.
+Publication uses staged copies with automated backup restoration on write failure;
+sequential file copies mean it does not claim atomic OS directory swapping, but
+guarantees that invalid tables are never published and caught write failures roll
+back to existing valid states. Shared dashboard adapters load both tables with
+`source == 'real'`.

@@ -5,8 +5,10 @@ model_manifest.json) into the shared contract tables:
   - artifacts/member1/forecasts/tables/demand_forecast (part-00000.parquet + .meta.json)
   - artifacts/member1/forecasts/tables/demand_metrics (part-00000.parquet + .meta.json)
 
-Validated with src.utils.contracts. Safe staged writing ensures failed validation
-or publication never corrupts or deletes existing valid exports.
+Validated with src.utils.contracts. Publication uses staged directory writing,
+pre-publication validation, and automated rollback/backup restoration on error.
+Note: File copies are sequential (part-00000.parquet and .meta.json) and do not
+claim OS-level atomic directory swaps.
 
 Usage:
   python scripts/export_demand_contracts.py [--config configs/demand_categories.yaml]
@@ -131,15 +133,52 @@ def build_demand_forecast_table(
     if not ((pred_counts >= 0.0) & (pred_counts != float("inf"))).all():
         raise ValueError("predicted_count contains negative or infinite values")
 
-    # 5. Chronological validity
-    fit_cutoffs = pd.to_datetime(selected["fit_cutoff"]).dt.date
+    # 5. Missing future labels guard: actual_count must not contain observed values
+    if "actual_count" in selected.columns and not selected["actual_count"].isna().all():
+        raise ValueError(
+            "future predictions table must not have observed actual_count values (missing future labels guard)"
+        )
+
+    # 6. Chronological and series consistency
     origins = pd.to_datetime(selected["forecast_origin"]).dt.date
-    targets = pd.to_datetime(selected["target_date"]).dt.date
+    if origins.nunique() != 1:
+        raise ValueError(
+            f"forecast_origin must be uniform across all future rows, found: {origins.unique()}"
+        )
+
+    manifest_cov_end = model_manifest.get("coverage", {}).get("end")
+    if manifest_cov_end and str(origins.iloc[0]) != str(manifest_cov_end):
+        raise ValueError(
+            f"forecast_origin {origins.iloc[0]} does not match manifest coverage end {manifest_cov_end}"
+        )
+
+    versions = selected["model_version"].unique()
+    if len(versions) != 1:
+        raise ValueError(
+            f"model_version must be uniform across all future rows, found: {versions}"
+        )
+
+    fit_cutoffs = pd.to_datetime(selected["fit_cutoff"]).dt.date
+    if fit_cutoffs.nunique() != 1:
+        raise ValueError(
+            f"fit_cutoff must be uniform across all future rows, found: {fit_cutoffs.unique()}"
+        )
 
     if (fit_cutoffs > origins).any():
         raise ValueError("training cutoff cannot exceed forecast origin")
+
+    targets = pd.to_datetime(selected["target_date"]).dt.date
     if (targets <= origins).any():
         raise ValueError("target dates must strictly follow forecast origin")
+
+    # 7. Horizon-to-date mapping: each row's target_date must equal forecast_origin + horizon_days
+    origin_dt = pd.to_datetime(origins)
+    expected_target_dts = origin_dt + pd.to_timedelta(selected["horizon_days"], unit="D")
+    expected_targets = expected_target_dts.dt.date
+    if not (targets == expected_targets).all():
+        raise ValueError(
+            "target_date does not match forecast_origin + horizon_days mapping"
+        )
 
     # 6. Map to contract schema
     df_out = pd.DataFrame(
@@ -263,6 +302,9 @@ def safe_publish_contract(
 
     Ensures that validation failures or partial write errors can never
     corrupt, overwrite, or delete an existing valid export.
+    Note: File copies are sequential (part-00000.parquet and .meta.json) and do
+    not claim OS-level atomic directory replacement. Rollback logic restores
+    the backup directory upon caught write failures.
     """
     problems = contracts.validate(df, name)
     if problems:
