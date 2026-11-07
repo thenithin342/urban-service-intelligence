@@ -26,6 +26,36 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "configs/demand_categories.yaml"
 
 
+def _real_demand_artifacts_present() -> bool:
+    """True when real Member 1 demand model artifacts are present on disk."""
+    return (
+        (ROOT / "artifacts" / "member1" / "demand_categories" / "future").is_dir()
+        and (ROOT / "artifacts" / "member1" / "demand_categories" / "metrics").is_dir()
+        and (ROOT / "artifacts" / "member1" / "demand_categories" / "predictions").is_dir()
+        and (ROOT / "data" / "raw" / "member1_history" / "manifest.json").is_file()
+    )
+
+
+def _published_demand_contracts_present() -> bool:
+    """True when demand contract tables have been exported to artifacts."""
+    fc_path = contracts.contract_path(ROOT, "demand_forecast")
+    fm_path = contracts.contract_path(ROOT, "demand_metrics")
+    fc_meta = contracts.manifest_path(ROOT, "demand_forecast")
+    fm_meta = contracts.manifest_path(ROOT, "demand_metrics")
+    return (
+        fc_path.is_dir()
+        and fm_path.is_dir()
+        and fc_meta.is_file()
+        and fm_meta.is_file()
+        and any(fc_path.glob("*.parquet"))
+        and any(fm_path.glob("*.parquet"))
+    )
+
+
+@pytest.mark.skipif(
+    not _real_demand_artifacts_present(),
+    reason="real demand artifacts not generated in this checkout (run train_models.py first)",
+)
 def test_export_demand_contracts_roundtrip_and_adapter_readback():
     """Verify export runs cleanly and dashboard adapters load real data without fixtures."""
     result = export_demand_contracts(CONFIG_PATH, root=ROOT, study_id="winter_history_91d")
@@ -62,6 +92,10 @@ def test_export_demand_contracts_roundtrip_and_adapter_readback():
     assert fm_check["warnings"] == []
 
 
+@pytest.mark.skipif(
+    not _published_demand_contracts_present(),
+    reason="demand contracts not exported in this checkout (run export_demand_contracts.py first)",
+)
 def test_demand_forecast_chronological_and_horizon_integrity():
     """Verify 7 consecutive horizons, future ordering, and no lookahead."""
     fc = ad.load_contract("demand_forecast", allow_fixture=False)
@@ -88,6 +122,10 @@ def test_demand_forecast_chronological_and_horizon_integrity():
     assert "HEAT/HOT WATER" in complaint_types
 
 
+@pytest.mark.skipif(
+    not _published_demand_contracts_present(),
+    reason="demand contracts not exported in this checkout (run export_demand_contracts.py first)",
+)
 def test_demand_forecast_numerical_and_key_invariants():
     """Verify non-negativity, non-null, and key uniqueness."""
     fc = ad.load_contract("demand_forecast", allow_fixture=False)
@@ -99,6 +137,10 @@ def test_demand_forecast_numerical_and_key_invariants():
     assert not (df["predicted_count"] == float("inf")).any()
 
 
+@pytest.mark.skipif(
+    not _published_demand_contracts_present(),
+    reason="demand contracts not exported in this checkout (run export_demand_contracts.py first)",
+)
 def test_demand_metrics_model_coverage_and_invariants():
     """Verify test metrics include all candidate models with non-negative errors."""
     fm = ad.load_contract("demand_metrics", allow_fixture=False)
@@ -352,6 +394,10 @@ def test_build_forecast_table_rejects_invalid_borough(tmp_path: Path):
         build_demand_forecast_table(tmp_path, manifest, cfg, "test_study")
 
 
+@pytest.mark.skipif(
+    not _published_demand_contracts_present(),
+    reason="demand contracts not exported in this checkout (run export_demand_contracts.py first)",
+)
 def test_demand_forecast_prevents_double_counting_and_separates_totals():
     """Verify that complaint_type=ALL totals and category subsets are not naively summed.
 
@@ -504,5 +550,150 @@ def test_incomplete_output_is_classified_as_invalid_never_real(tmp_path: Path):
             os.environ["USI_ROOT"] = old_root
         else:
             os.environ.pop("USI_ROOT", None)
+
+
+def test_export_demand_contracts_with_synthetic_fixture(tmp_path: Path):
+    """Verify full exporter pipeline, adapter readback, and double-counting checks in a clean environment."""
+    import os
+
+    import yaml
+
+    from src.ingestion.downloader import sha256_file
+
+    # 1. Source manifest and dummy producer
+    src_manifest = tmp_path / "data" / "raw" / "manifest.json"
+    src_manifest.parent.mkdir(parents=True)
+    src_manifest.write_text(json.dumps({"complete": True, "start": "2023-12-01", "end": "2024-02-29"}), encoding="utf-8")
+    src_hash = sha256_file(src_manifest)
+
+    prod_file = tmp_path / "src" / "modeling" / "demand.py"
+    prod_file.parent.mkdir(parents=True)
+    prod_file.write_text("# dummy producer\n", encoding="utf-8")
+    prod_hash = sha256_file(prod_file)
+
+    # 2. Synthetic future table: 6 boroughs (ALL + 3 categories for the 5 main boroughs) x 7 horizons = 147 rows
+    out_dir = tmp_path / "artifacts" / "member1" / "demand_synth"
+    out_dir.mkdir(parents=True)
+    future_dir = out_dir / "future"
+    future_dir.mkdir()
+
+    series_list = []
+    for b in ["BRONX", "BROOKLYN", "MANHATTAN", "QUEENS", "STATEN ISLAND"]:
+        series_list.append((b, "ALL", 100.0))
+        series_list.append((b, "HEAT/HOT WATER", 25.0))
+        series_list.append((b, "Illegal Parking", 25.0))
+        series_list.append((b, "Noise - Residential", 25.0))
+    series_list.append(("UNKNOWN", "ALL", 10.0))
+    assert len(series_list) == 21
+
+    future_rows = []
+    for b, c, base_cnt in series_list:
+        for h in range(1, 8):
+            target = (pd.Timestamp("2024-02-29") + pd.Timedelta(days=h)).strftime("%Y-%m-%d")
+            future_rows.append(
+                {
+                    "forecast_origin": "2024-02-29",
+                    "target_date": target,
+                    "borough": b,
+                    "complaint_type": c,
+                    "horizon_days": h,
+                    "actual_count": None,
+                    "predicted_count": base_cnt,
+                    "raw_prediction": base_cnt,
+                    "model": "seasonal_naive",
+                    "model_version": "demand-v2-seasonal_naive-2024-02-29",
+                    "fit_cutoff": "2024-02-29",
+                    "split": "future",
+                }
+            )
+    assert len(future_rows) == 147
+    pd.DataFrame(future_rows).to_parquet(future_dir / "part.parquet")
+
+    # 3. Synthetic metrics and predictions tables
+    metrics_dir = out_dir / "metrics"
+    metrics_dir.mkdir()
+    candidate_models = ["seasonal_naive", "weekday_mean", "lr_scaled", "lr_unscaled", "random_forest", "gbt"]
+    metric_rows = [
+        {"model": m, "split": "test", "rows": 100, "mae": 50.0, "rmse": 80.0, "wape": 0.12}
+        for m in candidate_models
+    ]
+    pd.DataFrame(metric_rows).to_parquet(metrics_dir / "part.parquet")
+
+    preds_dir = out_dir / "predictions"
+    preds_dir.mkdir()
+    pred_rows = [
+        {
+            "model": m,
+            "split": "test",
+            "target_date": "2024-02-20",
+            "model_version": f"demand-v2-{m}-2024-02-14",
+        }
+        for m in candidate_models
+    ]
+    pd.DataFrame(pred_rows).to_parquet(preds_dir / "part.parquet")
+
+    # 4. Model manifest
+    manifest_data = {
+        "selected_model": "seasonal_naive",
+        "producer_sha256": prod_hash,
+        "coverage": {
+            "source_manifest_sha256": src_hash,
+            "start": "2023-12-01",
+            "end": "2024-02-29",
+        },
+    }
+    (out_dir / "model_manifest.json").write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    # 5. Config YAML
+    cfg_data = {
+        "source_manifest": "data/raw/manifest.json",
+        "output_dir": "artifacts/member1/demand_synth",
+        "input_parquet": "data/processed/nyc311",
+        "quality_report": "artifacts/member1/etl_quality.json",
+        "train_end": "2024-01-31",
+        "validation_end": "2024-02-14",
+        "seed": 42,
+    }
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(cfg_data), encoding="utf-8")
+
+    # 6. Execute export targeting tmp_path
+    res = export_demand_contracts(cfg_file, root=tmp_path, study_id="synth_test")
+    assert res["status"] == "published"
+    assert res["demand_forecast"]["rows"] == 147
+    assert res["demand_metrics"]["rows"] == 6
+
+    # 7. Adapter verification under tmp_path
+    old_root = os.environ.get("USI_ROOT")
+    os.environ["USI_ROOT"] = str(tmp_path)
+    try:
+        fc = ad.load_contract("demand_forecast", allow_fixture=False)
+        assert fc.source == ad.REAL
+        assert len(fc.df) == 147
+        assert fc.problems == []
+
+        # Double-counting verification on synthetic data
+        all_rows = fc.df[fc.df["complaint_type"] == "ALL"]
+        cat_rows = fc.df[fc.df["complaint_type"] != "ALL"]
+        assert len(all_rows) == 42
+        assert len(cat_rows) == 105
+        # 5 boroughs * 100 * 7 days + 1 borough * 10 * 7 days = 3500 + 70 = 3570
+        assert all_rows["predicted_count"].sum() == 3570.0
+        # 15 category series * 25 * 7 days = 2625
+        assert cat_rows["predicted_count"].sum() == 2625.0
+
+        fm = ad.load_contract("demand_metrics", allow_fixture=False)
+        assert fm.source == ad.REAL
+        assert len(fm.df) == 6
+        assert fm.problems == []
+
+        assert ad.check_table("demand_forecast")["status"] == "ok"
+        assert ad.check_table("demand_metrics")["status"] == "ok"
+    finally:
+        if old_root is not None:
+            os.environ["USI_ROOT"] = old_root
+        else:
+            os.environ.pop("USI_ROOT", None)
+
 
 
