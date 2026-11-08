@@ -93,6 +93,7 @@ def _model_inputs_at_root(location_type: str, ws, we, window_days: int):
             & (d["forecast_date"] < cutoff + timedelta(days=window_days))
             & (d["training_cutoff"] <= we)
             & d["borough"].notna()
+            & (d["complaint_type"] != "ALL")
         ]
         if not d.empty:
             demand = (
