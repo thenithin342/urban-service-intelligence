@@ -1,0 +1,217 @@
+"""Cross-workstream integration tests: Member 1 demand forecasting to Member 3 priorities.
+
+Validates that Member 3 priority scoring consumes Member 1's real 147-row
+demand_forecast contract, verifies model provenance and window alignment,
+confirms demand_model_units > 0, guards against double counting complaint_type='ALL'
+borough totals, and validates dashboard adapter contract states.
+"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from dashboard import adapters as ad
+from src.prioritization import scoring
+from src.utils import contracts
+
+REPO = Path(__file__).resolve().parents[2]
+REAL_DEMAND_FC = REPO / "artifacts" / "member1" / "forecasts" / "tables" / "demand_forecast"
+REAL_DEMAND_MET = REPO / "artifacts" / "member1" / "forecasts" / "tables" / "demand_metrics"
+REAL_PRIORITY_SCORES = REPO / "artifacts" / "member3" / "priorities" / "tables" / "priority_scores"
+
+
+def _real_demand_and_priorities_present() -> bool:
+    return (
+        REAL_DEMAND_FC.is_dir()
+        and (REAL_DEMAND_FC / "part-00000.parquet").is_file()
+        and REAL_PRIORITY_SCORES.is_dir()
+        and (REAL_PRIORITY_SCORES / "part-00000.parquet").is_file()
+    )
+
+
+@pytest.mark.skipif(
+    not _real_demand_and_priorities_present(),
+    reason="real demand_forecast and priority_scores contracts absent in clean CI checkout",
+)
+def test_real_demand_forecast_consumed_by_priority_engine():
+    """Verify Member 3 priority engine consumes real Member 1 demand forecast."""
+    ps = ad.load_contract("priority_scores", allow_fixture=False)
+    fc = ad.load_contract("demand_forecast", allow_fixture=False)
+
+    assert ps.source == ad.REAL
+    assert ps.usable is True
+    assert ps.problems == []
+    assert len(ps.df) > 0
+
+    # 1. Assert demand_model_units > 0 and demand_source points to Member 1 model
+    meta = ps.meta
+    assert meta["demand_model_units"] > 0, "priority engine used observed fallback, not model demand"
+    assert meta["demand_model_units"] == 15, "expected 15 modeled borough-category pairs"
+
+    expected_model_version = "demand-v2-seasonal_naive-2024-02-29"
+    assert "member1 demand_forecast" in meta["demand_source"]
+    assert expected_model_version in meta["demand_source"]
+
+    # 2. Verify window alignment
+    ws = str(ps.df["window_start"].iloc[0])
+    we = str(ps.df["window_end"].iloc[0])
+    assert ws == "2024-02-23"
+    assert we == "2024-02-29"
+
+    # Forecast horizon starts the day after scoring window cutoff (2024-03-01)
+    fc_df = fc.df
+    fc_dates = pd.to_datetime(fc_df["forecast_date"]).dt.date
+    assert fc_dates.min() == date(2024, 3, 1)
+    assert fc_dates.max() == date(2024, 3, 7)
+
+    # 3. Verify exact numerical alignment for the 15 category series
+    fc_categories = fc_df[fc_df["complaint_type"] != "ALL"]
+    fc_mean = (
+        fc_categories.groupby(["borough", "complaint_type"])["predicted_count"]
+        .mean()
+        .to_dict()
+    )
+
+    ps_df = ps.df
+    for (borough, complaint_type), expected_mean in fc_mean.items():
+        matched = ps_df[(ps_df["location"] == borough) & (ps_df["complaint_type"] == complaint_type)]
+        assert not matched.empty, f"missing priority unit for ({borough}, {complaint_type})"
+        actual_demand_value = matched["demand_value"].iloc[0]
+        assert abs(actual_demand_value - expected_mean) < 1e-6, (
+            f"mismatched demand value for ({borough}, {complaint_type}): "
+            f"priority={actual_demand_value}, forecast={expected_mean}"
+        )
+
+
+@pytest.mark.skipif(
+    not _real_demand_and_priorities_present(),
+    reason="real demand_forecast and priority_scores contracts absent in clean CI checkout",
+)
+def test_priority_scores_guards_against_double_counting_all():
+    """Verify complaint_type='ALL' is not injected as an overlapping unit alongside categories."""
+    ps = ad.load_contract("priority_scores", allow_fixture=False)
+    ps_df = ps.df
+
+    # In priority_scores, units must be individual complaint types, never aggregate 'ALL'
+    all_units = ps_df[ps_df["complaint_type"] == "ALL"]
+    assert len(all_units) == 0, (
+        f"Found {len(all_units)} units with complaint_type='ALL'; "
+        "borough totals must not be scored as complaint categories to avoid double counting."
+    )
+
+    # Total units scored
+    assert len(ps_df) == 612
+    # Verify that ranked units have positive priority score and valid bounded components
+    assert (ps_df["priority_score"] >= 0.0).all()
+    assert (ps_df["priority_score"] <= 1.0).all()
+
+
+@pytest.mark.skipif(
+    not _real_demand_and_priorities_present(),
+    reason="real demand_forecast and priority_scores contracts absent in clean CI checkout",
+)
+def test_dashboard_demand_and_priority_contracts_load_as_real():
+    """Test that dashboard adapters load real contracts without fixture fallback."""
+    fc = ad.load_contract("demand_forecast", allow_fixture=False)
+    fm = ad.load_contract("demand_metrics", allow_fixture=False)
+    ps = ad.load_contract("priority_scores", allow_fixture=False)
+    pb = ad.load_contract("priority_backtest", allow_fixture=False)
+
+    for res, name, expected_len in [
+        (fc, "demand_forecast", 147),
+        (fm, "demand_metrics", 6),
+        (ps, "priority_scores", 612),
+        (pb, "priority_backtest", 108),
+    ]:
+        assert res.source == ad.REAL, f"{name} source expected real, got {res.source}"
+        assert res.usable is True, f"{name} is not usable"
+        assert res.problems == [], f"{name} reported problems: {res.problems}"
+        assert len(res.df) == expected_len, f"{name} expected {expected_len} rows, got {len(res.df)}"
+
+
+def test_synthetic_demand_to_priority_handoff_and_override(tmp_path):
+    """Test demand forecast override and double-counting protection using synthetic fixtures."""
+    from scripts.run_member3_priorities import _model_inputs_at_root
+
+    # 1. Create a synthetic demand_forecast table with both ALL and categories
+    root = tmp_path
+    fc_rows = []
+    # 2 boroughs x 7 horizons for ALL
+    # 2 boroughs x 2 categories x 7 horizons for categories
+    start_date = date(2024, 3, 1)
+    for h in range(7):
+        target = start_date + timedelta(days=h)
+        fc_rows.append({
+            "forecast_date": str(target),
+            "borough": "BROOKLYN",
+            "complaint_type": "ALL",
+            "predicted_count": 1000.0,
+            "training_cutoff": "2024-02-29",
+            "model_version": "test-v1",
+        })
+        fc_rows.append({
+            "forecast_date": str(target),
+            "borough": "BROOKLYN",
+            "complaint_type": "HEAT/HOT WATER",
+            "predicted_count": 300.0,
+            "training_cutoff": "2024-02-29",
+            "model_version": "test-v1",
+        })
+        fc_rows.append({
+            "forecast_date": str(target),
+            "borough": "BROOKLYN",
+            "complaint_type": "Illegal Parking",
+            "predicted_count": 400.0,
+            "training_cutoff": "2024-02-29",
+            "model_version": "test-v1",
+        })
+
+    fc_df = pd.DataFrame(fc_rows)
+    contracts.write_table(
+        fc_df,
+        root,
+        "demand_forecast",
+        {"producer": "test", "model_version": "test-v1", "is_fixture": False},
+    )
+
+    import os
+    prev = os.environ.get("USI_ROOT")
+    os.environ["USI_ROOT"] = str(root)
+    try:
+        demand, _backlog, demand_src, _backlog_src = _model_inputs_at_root(
+            "borough", date(2024, 2, 23), date(2024, 2, 29), 7
+        )
+        assert demand is not None
+        assert "test-v1" in demand_src
+
+        # Demand has 3 rows: (BROOKLYN, ALL), (BROOKLYN, HEAT/HOT WATER), (BROOKLYN, Illegal Parking)
+        assert len(demand) == 3
+
+        # Now simulate units that do not contain ALL
+        units = pd.DataFrame([
+            {"location": "BROOKLYN", "complaint_type": "HEAT/HOT WATER", "demand_value": 50.0, "backlog_value": 10.0},
+            {"location": "BROOKLYN", "complaint_type": "Illegal Parking", "demand_value": 60.0, "backlog_value": 15.0},
+            {"location": "BROOKLYN", "complaint_type": "Noise", "demand_value": 20.0, "backlog_value": 5.0},
+        ])
+
+        overridden, stats = scoring.apply_overrides(units, demand=demand)
+        # Stats must report 2 units overridden (HEAT and Parking), Noise kept observed (20.0)
+        assert stats["demand_model_units"] == 2
+        heat_val = overridden[overridden["complaint_type"] == "HEAT/HOT WATER"]["demand_value"].iloc[0]
+        parking_val = overridden[overridden["complaint_type"] == "Illegal Parking"]["demand_value"].iloc[0]
+        noise_val = overridden[overridden["complaint_type"] == "Noise"]["demand_value"].iloc[0]
+
+        assert heat_val == 300.0
+        assert parking_val == 400.0
+        assert noise_val == 20.0
+        # ALL is not in overridden units
+        assert "ALL" not in overridden["complaint_type"].values
+    finally:
+        if prev is None:
+            os.environ.pop("USI_ROOT", None)
+        else:
+            os.environ["USI_ROOT"] = prev

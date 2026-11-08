@@ -4,7 +4,7 @@
 **Workstream:** Member 1 (Developer A) — Data Engineering, Analytics, Benchmarking & Forecasting  
 **Branch:** [`feature/final-demand-export`](https://github.com/thenithin342/urban-service-intelligence/tree/feature/final-demand-export)  
 **Pull Request:** [PR #4: feat(member1): safe demand contracts export, adapter integration, and validation](https://github.com/thenithin342/urban-service-intelligence/pull/4)  
-**Head Commit SHA:** [`b545d14791fb96d4aaeb54164cee03feea79b038`](https://github.com/thenithin342/urban-service-intelligence/commit/b545d14791fb96d4aaeb54164cee03feea79b038)  
+**Head Commit SHA:** [`bb191011d7883cecc6dd1f405b38bd125313d0d5`](https://github.com/thenithin342/urban-service-intelligence/commit/bb191011d7883cecc6dd1f405b38bd125313d0d5)  
 **Remote CI Status:** PR #4 CI Job [`42343275360`](https://github.com/thenithin342/urban-service-intelligence/actions/runs/42343275360) and Branch Push CI Job [`42343150302`](https://github.com/thenithin342/urban-service-intelligence/actions/runs/42343150302) **PASSED**  
 **Audit Date:** 2026-11-07  
 **Audit Status:** Complete End-to-End Pipeline Verified (`PASS`)
@@ -18,7 +18,7 @@ Task A2 completes the full reproducibility and analytical pipeline audit of Memb
 ```mermaid
 flowchart LR
     A["Raw Data Ingestion<br>91 days / 799,439 rows"] --> B["Spark ETL Cleaning<br>771,504 clean / 27,935 flagged"]
-    B --> C["Analytics & Spatial<br>16 tables / 15 figures"]
+    B --> C["Analytics & Spatial<br>16 tables / 15 visual artifacts"]
     B --> D["Benchmarking<br>24 trials / Pandas vs Spark"]
     B --> E["Demand Forecasting<br>6 models / 21 series"]
     E --> F["Priority Features<br>21 borough-category units"]
@@ -29,6 +29,9 @@ flowchart LR
 ### Distinction Between Live Pipeline Execution and Static Artifact Audit
 To preserve computing resources and avoid unnecessary model retraining or data corruption, Task A2 clearly separates operations that were **rerun live** from those that were **inspected and audited**:
 
+> [!NOTE]
+> A full cold-start rerun from scratch (ingestion $\to$ ETL $\to$ clustering $\to$ model grid search) was **not** performed to prevent overwriting verified baseline artifacts. Instead, reproducible audit scripts (`scripts/audit_member1.py`, `scripts/export_demand_contracts.py`), contract loaders, and test suites were executed live, while underlying raw, ETL, and model tables were verified via hash manifests, schema inspections, and artifact integrity checks. Furthermore, generated data (`data/raw/`, `data/processed/`) and model outputs (`artifacts/`) are intentionally gitignored in repository source control.
+
 1. **Rerun & Executed Live:**
    - **Shared Contract Export (`scripts/export_demand_contracts.py`):** Re-executed and verified; generated `demand_forecast` (147 rows) and `demand_metrics` (6 rows) with full schema, range, and provenance checks.
    - **Independent Final Audit (`scripts/audit_member1.py`):** Re-executed live against Spark MLlib models and prediction tables; validated 14,994 prediction rows, 147 future forecasts, 21 priority handoff rows, 5 metric tables, and 24 benchmark trials (`status: PASS`).
@@ -37,7 +40,7 @@ To preserve computing resources and avoid unnecessary model retraining or data c
 2. **Inspected & Audited Without Retraining:**
    - **Raw History Data (`data/raw/member1_history/`):** Audited checksums, file counts (91 CSV slices), and row counts (799,439 rows) against `manifest.json`.
    - **Processed History ETL (`data/processed/member1_history/`):** Audited 9 Parquet partitions, schemas, and data quality flag distributions.
-   - **Analytics & Spatial Clustering (`artifacts/member1/analytics/`):** Audited all 16 Parquet tables and 15 PNG plots + 1 interactive HTML map.
+   - **Analytics & Spatial Clustering (`artifacts/member1/analytics/`):** Audited all 16 Parquet tables and **14 PNG plots + 1 interactive Folium HTML map (15 total visualization artifacts)**.
    - **Scalability Benchmarks (`artifacts/member1/benchmark/`):** Audited all 24 timing trials and `benchmark.json`.
    - **Demand Forecasting (`artifacts/member1/demand_categories/`):** Verified MLlib models and evaluation metrics without retraining.
 
@@ -69,7 +72,7 @@ To preserve computing resources and avoid unnecessary model retraining or data c
 
 ## 3. Analytics & Visualization Pipeline
 
-All 16 required analytical Parquet tables and 15 figures + 1 interactive HTML map were verified intact in `artifacts/member1/analytics/`:
+All 16 required analytical Parquet tables and **14 PNG plots + 1 interactive Folium HTML map (15 total visualization artifacts)** were verified intact in `artifacts/member1/analytics/`:
 
 ### Analytical Tables (`artifacts/member1/analytics/tables/`)
 | Table Name | Rows | Columns | Description |
@@ -117,7 +120,7 @@ All 16 required analytical Parquet tables and 15 figures + 1 interactive HTML ma
 ### Investigation of Benchmark Discrepancy
 In an earlier preliminary report turn, a claim of "Pandas 18.72s vs. Spark 5.23s (3.58x speedup)" was inadvertently reported due to mixing draft notes from an unconstrained external trial. 
 
-Inspection of the verified source of truth at [`artifacts/member1/benchmark/benchmark.json`](file:///C:/Users/theni/OneDrive/Documents/projects/asbd_project/artifacts/member1/benchmark/benchmark.json) confirms the true verified measurements:
+Inspection of the verified source of truth at [`artifacts/member1/benchmark/benchmark.json`](artifacts/member1/benchmark/benchmark.json) confirms the true verified measurements:
 - **At 799,439 rows (Full Dataset):**
   - **Pandas (p=0):** Median **5.8992s** (min: 5.5349s, max: 5.9003s, stdev: 0.2106s)
   - **Spark (p=2):** Median **5.2262s** (min: 5.1282s, max: 5.2511s, stdev: 0.0650s)

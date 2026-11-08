@@ -3,7 +3,7 @@
 **Workstream:** Member 1 (Developer A) — Demand Forecasting Contracts & Analytical Pipeline  
 **Repository:** [https://github.com/thenithin342/urban-service-intelligence](https://github.com/thenithin342/urban-service-intelligence)  
 **Branch:** [`feature/final-demand-export`](https://github.com/thenithin342/urban-service-intelligence/tree/feature/final-demand-export)  
-**Head Commit SHA:** [`b545d14791fb96d4aaeb54164cee03feea79b038`](https://github.com/thenithin342/urban-service-intelligence/commit/b545d14791fb96d4aaeb54164cee03feea79b038)  
+**Head Commit SHA:** [`bb191011d7883cecc6dd1f405b38bd125313d0d5`](https://github.com/thenithin342/urban-service-intelligence/commit/bb191011d7883cecc6dd1f405b38bd125313d0d5)  
 **Pull Request:** [PR #4: feat(member1): safe demand contracts export, adapter integration, and validation](https://github.com/thenithin342/urban-service-intelligence/pull/4)  
 **Initial Feature Commit SHA:** [`a0693644364805e3fd6c3b77bd4e6a325e2742b1`](https://github.com/thenithin342/urban-service-intelligence/commit/a0693644364805e3fd6c3b77bd4e6a325e2742b1)  
 **Status:** Verification Complete; Pull Request Open against `main` (Unmerged)
@@ -14,13 +14,14 @@
 
 - **Branch Name:** `feature/final-demand-export`
 - **Pull Request:** [https://github.com/thenithin342/urban-service-intelligence/pull/4](https://github.com/thenithin342/urban-service-intelligence/pull/4)
-- **Head SHA:** `b545d14791fb96d4aaeb54164cee03feea79b038`
+- **Head SHA:** `bb191011d7883cecc6dd1f405b38bd125313d0d5`
 - **Remote Tracking:** `origin/feature/final-demand-export` is fully up-to-date.
 - **Commit History on Feature Branch:**
   1. `a069364` — `feat(member1): implement safe demand contract export and adapter verification`
   2. `799a258` — `test(member1): add rollback failure tests and double counting guards`
   3. `7aef5f6` — `test(member1): support clean checkout environments and add synthetic fixture test`
   4. `b545d14` — `fix(member1): add horizon and metadata consistency validation and document publication atomicity limits`
+  5. `bb19101` — `docs(member1): reconcile benchmark measurements, ci test disparity, and report artifacts`
 - **Remote CI Run Status:**
   - Pull Request CI Job [`42343275360`](https://github.com/thenithin342/urban-service-intelligence/actions/runs/42343275360): **PASSED** in 4m 35s.
   - Branch Push CI Job [`42343150302`](https://github.com/thenithin342/urban-service-intelligence/actions/runs/42343150302): **PASSED** in 3m 03s.
@@ -148,11 +149,13 @@ met = ad.load_contract("demand_metrics", allow_fixture=False)
 
 ### Underlying Artifact Provenance & Model Reconciliation
 - **Selected Model:** `seasonal_naive` (version `demand-v2-seasonal_naive-2024-02-29`), as recorded in `artifacts/member1/demand_categories/model_manifest.json`.
-- **Prediction Values:** Exact numerical parity with `artifacts/member1/demand_categories/predictions.parquet` (`0.0` max absolute deviation).
+- **Future Forecast Artifact Path:** `artifacts/member1/demand_categories/future/` (`split == 'future'`).
+- **Prediction Values:** Exact numerical parity with `artifacts/member1/demand_categories/future/` (`0.0` max absolute deviation).
 - **Dates & Windows:**
-  - Training Cutoff: `2024-02-24` (history origin `2024-02-29`).
-  - Forecast Horizon: `2024-03-01` to `2024-03-07` (consecutive 7 days).
-  - Test Evaluation Window: `2024-02-15` to `2024-02-29` (14-day holdout).
+  - **Final Future Fit Cutoff:** `2024-02-29` (history origin `2024-02-29`, all 91 days of winter history used for final fit).
+  - **Future Forecast Horizon:** `2024-03-01` to `2024-03-07` (consecutive 7 days ahead, published to `demand_forecast`).
+  - **Test Evaluation Cutoff:** `2024-02-14` (used for test holdout evaluation across candidate models in `artifacts/member1/demand_categories/predictions/`).
+  - **Test Evaluation Window:** `2024-02-15` to `2024-02-29` (14-day holdout, metrics exported to `demand_metrics`).
 - **Candidate Evaluation Metrics (Reconciled from `metrics/` on test split):**
   - `weekday_mean`: MAE = 54.150, RMSE = 103.161, WAPE = 0.1011
   - `lr_scaled`: MAE = 61.194, RMSE = 102.265, WAPE = 0.1143
@@ -161,6 +164,7 @@ met = ad.load_contract("demand_metrics", allow_fixture=False)
   - `seasonal_naive`: MAE = 72.718, RMSE = 117.945, WAPE = 0.1358
   - `gbt`: MAE = 87.028, RMSE = 165.534, WAPE = 0.1625
 - **Source SHA-256 Checksum:** `3a6a21ea0b32710b39619f54fdbb34eaca75c50e5b351df7a888eee5f2a9f22e` (verified matching raw manifest `data/raw/member1_history/manifest.json`).
+- **Artifact Gitignore Note:** All generated datasets under `data/raw/`, `data/processed/`, and large model artifacts under `artifacts/` are gitignored to preserve repository lightweightness; reproducibility scripts regenerate or audit them locally.
 
 ---
 
