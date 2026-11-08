@@ -101,13 +101,34 @@ python scripts/run_member3_priorities.py --config configs/sample.yaml --input da
    - **Cutoff Date:** `2024-03-01` (`window_end + 1 day`).
    - **Demand Forecast Horizon:** `2024-03-01` to `2024-03-07` (7 consecutive days, fit cutoff `2024-02-29`).
    - **Chronological Validity:** The demand forecast begins on the exact cutoff day `2024-03-01`, providing forward-looking demand estimates without lookahead leakage.
-4. **Exact Numerical Parity:**
-   - For each of the 15 modeled borough/category pairs, the 7-day mean forecast was compared against `demand_value` in `priority_scores`:
-   - Maximum absolute discrepancy: **$0.0$** (Exact floating point match).
-   - Examples:
-     - Brooklyn `Illegal Parking`: Forecast mean = 513.857 complaints/day $\to$ Priority `demand_value` = 513.857.
-     - Bronx `HEAT/HOT WATER`: Forecast mean = 343.143 complaints/day $\to$ Priority `demand_value` = 343.143.
-     - Manhattan `HEAT/HOT WATER`: Forecast mean = 192.714 complaints/day $\to$ Priority `demand_value` = 192.714.
+4. **Exact Numerical Parity & Metric Accounting:**
+   - In `priority_scores`, two related demand columns are generated for each unit:
+     - `window_count`: The **7-day total predicted volume** (integer cast).
+     - `demand_value`: The **daily mean forecast** ($\text{7-day total} / 7.0$, floating-point).
+   - For all 15 modeled borough/category pairs, the 7-day daily mean forecast matches `priority_scores.demand_value` with **zero discrepancy** ($|\Delta| = 0.0$).
+   - **Numerical Parity Table (All 15 Modeled Series):**
+
+| Borough | Complaint Type | 7-Day Forecast Sum | Daily Mean Forecast | Priority `window_count` | Priority `demand_value` | Absolute Delta ($|\Delta|$) |
+|:---|:---|:---:|:---:|:---:|:---:|:---:|
+| **BRONX** | `HEAT/HOT WATER` | `2402.0` | `343.14285714285717` | `2402` | `343.14285714285717` | **`0.0`** |
+| **BRONX** | `Illegal Parking` | `1445.0` | `206.42857142857142` | `1445` | `206.42857142857142` | **`0.0`** |
+| **BRONX** | `Noise - Residential` | `1382.0` | `197.42857142857142` | `1382` | `197.42857142857142` | **`0.0`** |
+| **BROOKLYN** | `HEAT/HOT WATER` | `1568.0` | `224.00000000000000` | `1568` | `224.00000000000000` | **`0.0`** |
+| **BROOKLYN** | `Illegal Parking` | `3597.0` | `513.85714285714290` | `3597` | `513.85714285714290` | **`0.0`** |
+| **BROOKLYN** | `Noise - Residential` | `1451.0` | `207.28571428571428` | `1451` | `207.28571428571428` | **`0.0`** |
+| **MANHATTAN** | `HEAT/HOT WATER` | `1349.0` | `192.71428571428572` | `1349` | `192.71428571428572` | **`0.0`** |
+| **MANHATTAN** | `Illegal Parking` | `1302.0` | `186.00000000000000` | `1302` | `186.00000000000000` | **`0.0`** |
+| **MANHATTAN** | `Noise - Residential` | `1253.0` | `179.00000000000000` | `1253` | `179.00000000000000` | **`0.0`** |
+| **QUEENS** | `HEAT/HOT WATER` | `860.0` | `122.85714285714286` | `860` | `122.85714285714286` | **`0.0`** |
+| **QUEENS** | `Illegal Parking` | `2869.0` | `409.85714285714283` | `2869` | `409.85714285714283` | **`0.0`** |
+| **QUEENS** | `Noise - Residential` | `1056.0` | `150.85714285714286` | `1056` | `150.85714285714286` | **`0.0`** |
+| **STATEN ISLAND** | `HEAT/HOT WATER` | `98.0` | `14.00000000000000` | `98` | `14.00000000000000` | **`0.0`** |
+| **STATEN ISLAND** | `Illegal Parking` | `281.0` | `40.142857142857146` | `281` | `40.142857142857146` | **`0.0`** |
+| **STATEN ISLAND** | `Noise - Residential` | `103.0` | `14.714285714285714` | `103` | `14.714285714285714` | **`0.0`** |
+| **TOTAL (15 series)** | — | **`21,016.0`** | **`3,002.285714285714`** | **`21,016`** | **`3,002.285714285714`** | **`0.0`** |
+
+> [!NOTE]
+> Distinguish the 7-day volume (`window_count`) from the daily mean forecast rate (`demand_value`). For example, for Bronx `HEAT/HOT WATER`, the 7 daily forecast predictions are `[293, 329, 482, 304, 297, 263, 434]`, yielding a 7-day sum of `2,402.0` (`window_count = 2402`) and a daily mean rate of `343.14285714285717` (`demand_value = 343.14285714285717`). Both match with zero discrepancy.
 
 ### Priority Backtest Clarification
 > [!IMPORTANT]
@@ -204,11 +225,13 @@ The shared contract checker was executed locally against all 10 registered table
 |---|---|
 | **Priority CLI Command** | `python scripts/run_member3_priorities.py --config configs/sample.yaml --input data/processed/member1_history --location-type borough` |
 | **Raw History Source Hash** | `3a6a21ea0b32710b39619f54fdbb34eaca75c50e5b351df7a888eee5f2a9f22e` (`data/raw/member1_history/manifest.json`) |
-| **Selected Forecast Model** | `seasonal_naive` (fit cutoff `2024-02-29`, version `demand-v2-seasonal_naive-2024-02-29`) |
+| **Contract Schema Version** | `1.0.0` (as defined in `demand_forecast.meta.json` and `priority_scores.meta.json`) |
+| **Selected Model Version** | `demand-v2-seasonal_naive-2024-02-29` (model: `seasonal_naive`, training cutoff: `2024-02-29`) |
+| **Priority Scoring Version** | `member3-priority-v1` (producer: `member3-priorities`) |
 | **Scoring Window** | `2024-02-23` to `2024-02-29` (7 days); Cutoff = `2024-03-01` |
 | **Forecast Horizon** | `2024-03-01` to `2024-03-07` (consecutive 7 days, exactly matches cutoff) |
 | **Scored Units Breakdown** | 612 borough/category pairs (15 model-enhanced pairs, 597 observed-demand pairs) |
-| **Demand Value Parity** | Max absolute difference = `0.0` between `demand_forecast` 7-day average and `priority_scores.demand_value` |
+| **Demand Value Parity** | Max absolute difference = `0.0` between `demand_forecast` 7-day average and `priority_scores.demand_value` across all 15 series |
 | **Dashboard AppTest Result** | Headless Streamlit execution of `forecasts.py` and `priorities.py` rendered cleanly with 0 exceptions and `REAL` badges |
 | **Contract Output Statuses** | `demand_forecast` (ok, 147 rows), `demand_metrics` (ok, 6 rows), `priority_scores` (ok, 612 rows), `priority_backtest` (ok, 108 rows) |
 
@@ -217,7 +240,7 @@ The shared contract checker was executed locally against all 10 registered table
 | Environment | Command | Passed | Skipped | Deselected | Warnings | Runtime | Notes |
 |---|---|---|---|---|---|---|---|
 | **Local Workspace** | `pytest -v tests/integration/test_member1_member3_handoff.py` | **5** | 0 | 0 | 0 | 2.08s | All 5 handoff and double-counting tests execute against real artifacts. |
-| **Clean GitHub CI** | PR Workflow [`42448073126`](https://github.com/thenithin342/urban-service-intelligence/actions/runs/42448073126) | **276** | **37** | **1** | 161 | 3m 04s | Real-data tests skip cleanly (`"real demand_forecast and priority_scores contracts absent"`); synthetic handoff tests execute and pass. |
+| **Clean GitHub CI** | PR Workflow [`42449355387`](https://github.com/thenithin342/urban-service-intelligence/actions/runs/42449355387) (commit `daeac69`) | **277** | **37** | **1** | 161 | 4m 08s | Real-data tests skip cleanly (`"real demand_forecast and priority_scores contracts absent"`); synthetic handoff tests execute and pass. |
 
 ---
 
