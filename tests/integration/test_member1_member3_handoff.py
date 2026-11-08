@@ -195,23 +195,98 @@ def test_synthetic_demand_to_priority_handoff_and_override(tmp_path):
 
         # Now simulate units that do not contain ALL
         units = pd.DataFrame([
-            {"location": "BROOKLYN", "complaint_type": "HEAT/HOT WATER", "demand_value": 50.0, "backlog_value": 10.0},
-            {"location": "BROOKLYN", "complaint_type": "Illegal Parking", "demand_value": 60.0, "backlog_value": 15.0},
-            {"location": "BROOKLYN", "complaint_type": "Noise", "demand_value": 20.0, "backlog_value": 5.0},
+            {"location": "BROOKLYN", "complaint_type": "HEAT/HOT WATER", "window_count": 350, "demand_value": 50.0, "backlog_value": 10.0},
+            {"location": "BROOKLYN", "complaint_type": "Illegal Parking", "window_count": 420, "demand_value": 60.0, "backlog_value": 15.0},
+            {"location": "BROOKLYN", "complaint_type": "Noise", "window_count": 140, "demand_value": 20.0, "backlog_value": 5.0},
         ])
 
         overridden, stats = scoring.apply_overrides(units, demand=demand)
         # Stats must report 2 units overridden (HEAT and Parking), Noise kept observed (20.0)
         assert stats["demand_model_units"] == 2
-        heat_val = overridden[overridden["complaint_type"] == "HEAT/HOT WATER"]["demand_value"].iloc[0]
-        parking_val = overridden[overridden["complaint_type"] == "Illegal Parking"]["demand_value"].iloc[0]
-        noise_val = overridden[overridden["complaint_type"] == "Noise"]["demand_value"].iloc[0]
+        heat_row = overridden[overridden["complaint_type"] == "HEAT/HOT WATER"].iloc[0]
+        parking_row = overridden[overridden["complaint_type"] == "Illegal Parking"].iloc[0]
+        noise_row = overridden[overridden["complaint_type"] == "Noise"].iloc[0]
 
-        assert heat_val == 300.0
-        assert parking_val == 400.0
-        assert noise_val == 20.0
+        # demand_value is overridden by model
+        assert heat_row["demand_value"] == 300.0
+        assert parking_row["demand_value"] == 400.0
+        assert noise_row["demand_value"] == 20.0
+
+        # historical window_count remains untouched
+        assert heat_row["window_count"] == 350
+        assert parking_row["window_count"] == 420
+        assert noise_row["window_count"] == 140
+
         # ALL is not in overridden units
         assert "ALL" not in overridden["complaint_type"].values
+    finally:
+        if prev is None:
+            os.environ.pop("USI_ROOT", None)
+        else:
+            os.environ["USI_ROOT"] = prev
+
+
+def test_override_preserves_historical_window_count_when_demand_differs(tmp_path):
+    """Regression test: proving that window_count reflects historical observed records
+
+    and remains unchanged even when demand_value is overridden by a different forecast.
+    """
+    from scripts.run_member3_priorities import _model_inputs_at_root
+
+    root = tmp_path
+    fc_rows = []
+    start_date = date(2024, 3, 1)
+    # Predicted demand is 500.0/day for 7 days (total 3500.0), which strongly differs
+    # from historical observation (e.g., 50.0/day, window_count = 350).
+    for h in range(7):
+        target = start_date + timedelta(days=h)
+        fc_rows.append({
+            "forecast_date": str(target),
+            "borough": "MANHATTAN",
+            "complaint_type": "HEAT/HOT WATER",
+            "predicted_count": 500.0,
+            "training_cutoff": "2024-02-29",
+            "model_version": "test-differing-v1",
+        })
+
+    fc_df = pd.DataFrame(fc_rows)
+    contracts.write_table(
+        fc_df,
+        root,
+        "demand_forecast",
+        {"producer": "test", "model_version": "test-differing-v1", "is_fixture": False},
+    )
+
+    import os
+    prev = os.environ.get("USI_ROOT")
+    os.environ["USI_ROOT"] = str(root)
+    try:
+        demand, _backlog, _demand_src, _backlog_src = _model_inputs_at_root(
+            "borough", date(2024, 2, 23), date(2024, 2, 29), 7
+        )
+        assert demand is not None
+        assert demand["value"].iloc[0] == 500.0
+
+        # Simulate observed units produced by observed_components() where window_count = 350
+        units = pd.DataFrame([
+            {
+                "location": "MANHATTAN",
+                "complaint_type": "HEAT/HOT WATER",
+                "window_count": 350,  # historical observed count
+                "demand_value": 50.0,  # historical daily mean (350 / 7)
+                "backlog_value": 25.0,
+            }
+        ])
+
+        overridden, stats = scoring.apply_overrides(units, demand=demand)
+        assert stats["demand_model_units"] == 1
+
+        row = overridden.iloc[0]
+        # demand_value is successfully overridden to forecast value (500.0)
+        assert row["demand_value"] == 500.0
+        # window_count MUST strictly preserve the historical observed count (350), NOT forecast sum (3500)
+        assert row["window_count"] == 350
+        assert row["window_count"] != 500.0 * 7
     finally:
         if prev is None:
             os.environ.pop("USI_ROOT", None)
