@@ -188,8 +188,10 @@ def test_synthetic_demand_to_priority_handoff_and_override(tmp_path):
         assert demand is not None
         assert "test-v1" in demand_src
 
-        # Demand has 3 rows: (BROOKLYN, ALL), (BROOKLYN, HEAT/HOT WATER), (BROOKLYN, Illegal Parking)
-        assert len(demand) == 3
+        # Demand has 2 rows: (BROOKLYN, HEAT/HOT WATER) and (BROOKLYN, Illegal Parking).
+        # complaint_type == 'ALL' is explicitly excluded from category-level demand overrides.
+        assert len(demand) == 2
+        assert "ALL" not in demand["complaint_type"].values
 
         # Now simulate units that do not contain ALL
         units = pd.DataFrame([
@@ -210,6 +212,78 @@ def test_synthetic_demand_to_priority_handoff_and_override(tmp_path):
         assert noise_val == 20.0
         # ALL is not in overridden units
         assert "ALL" not in overridden["complaint_type"].values
+    finally:
+        if prev is None:
+            os.environ.pop("USI_ROOT", None)
+        else:
+            os.environ["USI_ROOT"] = prev
+
+
+def test_override_prevents_double_counting_even_if_units_contain_all(tmp_path):
+    """Regression test: even if input units unexpectedly contain an 'ALL' row,
+
+    category-level overrides never override or double-count borough totals.
+    """
+    from scripts.run_member3_priorities import _model_inputs_at_root
+
+    root = tmp_path
+    fc_rows = []
+    start_date = date(2024, 3, 1)
+    for h in range(7):
+        target = start_date + timedelta(days=h)
+        fc_rows.append({
+            "forecast_date": str(target),
+            "borough": "QUEENS",
+            "complaint_type": "ALL",
+            "predicted_count": 2000.0,
+            "training_cutoff": "2024-02-29",
+            "model_version": "test-v2",
+        })
+        fc_rows.append({
+            "forecast_date": str(target),
+            "borough": "QUEENS",
+            "complaint_type": "Noise - Residential",
+            "predicted_count": 150.0,
+            "training_cutoff": "2024-02-29",
+            "model_version": "test-v2",
+        })
+
+    fc_df = pd.DataFrame(fc_rows)
+    contracts.write_table(
+        fc_df,
+        root,
+        "demand_forecast",
+        {"producer": "test", "model_version": "test-v2", "is_fixture": False},
+    )
+
+    import os
+    prev = os.environ.get("USI_ROOT")
+    os.environ["USI_ROOT"] = str(root)
+    try:
+        demand, _backlog, _demand_src, _backlog_src = _model_inputs_at_root(
+            "borough", date(2024, 2, 23), date(2024, 2, 29), 7
+        )
+        assert demand is not None
+        # Demand must NOT contain 'ALL'
+        assert "ALL" not in demand["complaint_type"].values
+        assert len(demand) == 1
+        assert demand["complaint_type"].iloc[0] == "Noise - Residential"
+
+        # Simulate corrupt/unexpected input units that include an 'ALL' row
+        units = pd.DataFrame([
+            {"location": "QUEENS", "complaint_type": "ALL", "demand_value": 800.0, "backlog_value": 100.0},
+            {"location": "QUEENS", "complaint_type": "Noise - Residential", "demand_value": 40.0, "backlog_value": 10.0},
+        ])
+
+        overridden, stats = scoring.apply_overrides(units, demand=demand)
+
+        # Only Noise is overridden; ALL remains untouched (keeps 800.0)
+        assert stats["demand_model_units"] == 1
+        noise_val = overridden[overridden["complaint_type"] == "Noise - Residential"]["demand_value"].iloc[0]
+        all_val = overridden[overridden["complaint_type"] == "ALL"]["demand_value"].iloc[0]
+
+        assert noise_val == 150.0
+        assert all_val == 800.0  # NOT replaced with 2000.0 from demand_forecast
     finally:
         if prev is None:
             os.environ.pop("USI_ROOT", None)

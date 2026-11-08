@@ -4,14 +4,14 @@
 **Integration Partner:** Member 3 (Developer C) — Priority Scoring Engine & Dashboard  
 **Repository:** [https://github.com/thenithin342/urban-service-intelligence](https://github.com/thenithin342/urban-service-intelligence)  
 **Branch:** [`feature/final-demand-export`](https://github.com/thenithin342/urban-service-intelligence/tree/feature/final-demand-export)  
-**PR:** [PR #4: feat(member1): safe demand contracts export, adapter integration, and validation](https://github.com/thenithin342/urban-service-intelligence/pull/4)  
-**Status:** Verification Complete; Automated Integration Tests Passing; PR #4 Updated  
+**Pull Request:** [PR #4: feat(member1): safe demand contracts export, adapter integration, and validation](https://github.com/thenithin342/urban-service-intelligence/pull/4)  
+**Status:** Verification Complete; Automated Integration Tests Passing; PR #4 Updated (Unmerged)  
 
 ---
 
 ## 1. Executive Summary & Integration Scope
 
-Task A3 validates the end-to-end integration between Member 1's published demand forecasting contracts and Member 3's priority scoring engine. Using the supported priority CLI on real processed 311 historical data, we verified that Member 3 consumes the real 147-row `demand_forecast` table, correctly maps the 15 modeled borough-category series, preserves strict scoring window and cutoff alignment, guards against double counting `complaint_type == 'ALL'` borough totals, and cleanly renders as `REAL` in the Streamlit dashboard.
+Task A3 establishes verified cross-workstream integration between Member 1's published demand forecasting contracts and Member 3's priority scoring engine. Using the official supported priority CLI on real processed 311 historical data, we verified that Member 3 consumes the real 147-row `demand_forecast` table, correctly maps the 15 modeled borough/category pairs, preserves strict scoring window and cutoff alignment, guards against double counting `complaint_type == 'ALL'` borough totals, and cleanly renders as `REAL` in the Streamlit dashboard.
 
 ```mermaid
 flowchart TD
@@ -27,8 +27,8 @@ flowchart TD
     subgraph Member3["Member 3: Priority Scoring Engine"]
         CLI["scripts/run_member3_priorities.py<br>--config configs/sample.yaml<br>--input data/processed/member1_history<br>--location-type borough"]
         Engine["src/prioritization/scoring.py<br>apply_overrides(units, demand)"]
-        PS["priority_scores<br>612 units ranked<br>demand_model_units == 15"]
-        PB["priority_backtest<br>108 rows (12 windows)"]
+        PS["priority_scores<br>612 borough/category units<br>demand_model_units == 15"]
+        PB["priority_backtest<br>108 rows (12 windows)<br>observed demand/backlog"]
         CLI --> Engine --> PS
         Engine --> PB
     end
@@ -61,8 +61,8 @@ python scripts/run_member3_priorities.py --config configs/sample.yaml --input da
   - `created`: 139,956 aggregate rows
   - `delay`: 151,740 aggregate rows
   - `coords`: 5 borough centroids
-- **Timing:** Spark aggregation: 40.53s, Total pipeline runtime: 53.36s.
-- **Backtest:** 12 rolling evaluation windows evaluated against volume-only and random baselines.
+- **Timing:** Spark aggregation: 29.91s, Total pipeline runtime: 34.89s.
+- **Units Scored:** Exactly **612 borough/category pairs**.
 
 ### Priority Metadata Provenance (`artifacts/member3/priorities/tables/priority_scores.meta.json`)
 ```json
@@ -92,7 +92,7 @@ python scripts/run_member3_priorities.py --config configs/sample.yaml --input da
 
 ### Verification Findings
 1. **Real Model Demand Consumed (`demand_model_units > 0`):**
-   - `demand_model_units = 15`: Exactly 15 borough-category units were overridden with Member 1's real model predictions.
+   - `demand_model_units = 15`: Exactly 15 borough/category pairs were overridden with Member 1's real model predictions.
    - `demand_source`: Explicitly credits Member 1's selected model: `"member1 demand_forecast mean predicted_count (model_version demand-v2-seasonal_naive-2024-02-29)"`.
 2. **Backlog Fallback Accounting:**
    - `backlog_model_units = 0`: Because Member 2 closure models have not published real production tables yet, `run_member3_priorities.py` safely fell back to observed backlog (`observed: complaints created in the window still open at the cut-off`), preventing pipeline crashes.
@@ -102,26 +102,42 @@ python scripts/run_member3_priorities.py --config configs/sample.yaml --input da
    - **Demand Forecast Horizon:** `2024-03-01` to `2024-03-07` (7 consecutive days, fit cutoff `2024-02-29`).
    - **Chronological Validity:** The demand forecast begins on the exact cutoff day `2024-03-01`, providing forward-looking demand estimates without lookahead leakage.
 4. **Exact Numerical Parity:**
-   - For each of the 15 modeled borough-category series, the 7-day mean forecast was compared against `demand_value` in `priority_scores`:
+   - For each of the 15 modeled borough/category pairs, the 7-day mean forecast was compared against `demand_value` in `priority_scores`:
    - Maximum absolute discrepancy: **$0.0$** (Exact floating point match).
    - Examples:
      - Brooklyn `Illegal Parking`: Forecast mean = 513.857 complaints/day $\to$ Priority `demand_value` = 513.857.
      - Bronx `HEAT/HOT WATER`: Forecast mean = 343.143 complaints/day $\to$ Priority `demand_value` = 343.143.
      - Manhattan `HEAT/HOT WATER`: Forecast mean = 192.714 complaints/day $\to$ Priority `demand_value` = 192.714.
 
+### Priority Backtest Clarification
+> [!IMPORTANT]
+> The 108-row `priority_backtest` table (`src/prioritization/backtest.py::run_backtest`) uses **strictly observed demand and backlog**, not Member 1's forward model predictions. The backtest evaluates the heuristic ranking algorithm's ability to anticipate volume using observed historical signals across 12 rolling evaluation windows against volume-only and random baselines. **We do NOT claim that this backtest demonstrates or validates Member 1's forecasting benefit.** Demonstrating forecasting lift in the priority score would require retrospective rolling model refits across all 12 historical windows, which was not part of the baseline contract.
+
 ---
 
 ## 3. Double-Counting Prevention & Granularity Separation
 
-### Architectural Double-Counting Risk
-In `demand_forecast`, rows with `complaint_type == 'ALL'` represent borough totals (58,260 predicted complaints across 6 series), while named complaint types represent category subsets (21,016 predicted complaints across 15 series). If `complaint_type == 'ALL'` were naively merged into priority scoring units alongside category rows, the borough totals would compete with, duplicate, or distort operational rankings.
+### Unit Terminology & Accounting
+In `priority_scores`, the 612 scored units represent distinct **borough/category pairs** (e.g. `(BRONX, Illegal Parking)`, `(QUEENS, Noise - Residential)`, etc.), not citywide distinct complaint types.
+- **15 Model-Enhanced Units:** The 15 modeled borough/category pairs (5 boroughs × 3 modeled categories: `HEAT/HOT WATER`, `Illegal Parking`, `Noise - Residential`).
+- **597 Observed-Demand Units:** The remaining 597 borough/category pairs present in the 7-day window, which retain their empirical observation frequency ($N / 7$).
 
-### Safeguards Implemented & Verified
-1. **Unit Definition:** In `src/prioritization/scoring.py::observed_components`, scoring units are constructed from actual 311 service records `(location, complaint_type)` observed in the scoring window (612 units across NYC).
-2. **Exclusion of `ALL`:** Citizens never file a 311 request with category `"ALL"`. As a result, no unit in `priority_scores` has `complaint_type == 'ALL'` (`len(ps_df[ps_df["complaint_type"] == "ALL"]) == 0`).
-3. **Selective Override:** When `apply_overrides(units, demand)` joins on `(location, complaint_type)`, only the 15 specific category forecasts match actual units. The 6 borough total `ALL` rows in `demand_forecast` are safely unmerged into individual complaint rankings.
-4. **Unmodeled Category Handling:** The remaining 597 complaint categories (which Member 1 did not model) retain their empirical window observation rate ($N / 7$).
-5. **Score Normalization:** Min-max normalization for `demand_component` operates across distinct, non-overlapping categories, guaranteeing valid $[0.0, 1.0]$ bounds for all 612 units.
+### Coordinated Safeguard with Developer C
+In `demand_forecast`, rows with `complaint_type == 'ALL'` represent borough totals (58,260 predicted complaints across 42 rows: 6 series × 7 horizons), while named categories represent subsets (21,016 predicted complaints across 105 rows: 15 series × 7 horizons).
+
+To prevent borough totals from ever leaking into category-level rankings:
+1. **Coordinated Loader Filter:** In Developer C's CLI loader `scripts/run_member3_priorities.py::_model_inputs_at_root`, line 95 was coordinated to explicitly filter out `complaint_type == 'ALL'`:
+   ```python
+   d = d[
+       (d["forecast_date"] >= cutoff)
+       & (d["forecast_date"] < cutoff + timedelta(days=window_days))
+       & (d["training_cutoff"] <= we)
+       & d["borough"].notna()
+       & (d["complaint_type"] != "ALL")
+   ]
+   ```
+2. **Explicit Exclusion:** As a result, the `demand` override frame passed to `apply_overrides()` contains **exactly 15 rows** (the 15 category series) and never contains `ALL`.
+3. **Double-Counting Regression Test:** Added `test_override_prevents_double_counting_even_if_units_contain_all()` in `tests/integration/test_member1_member3_handoff.py`. This test proves that even if input units unexpectedly contain an `'ALL'` row, category overrides explicitly ignore `'ALL'` and leave it at observed values, preventing borough totals from inflating category rankings.
 
 ---
 
@@ -153,7 +169,7 @@ Headless Streamlit execution of the dashboard views via `streamlit.testing.v1.Ap
 
 ## 5. Contract Output Audit (`scripts/check_outputs.py --json`)
 
-The shared contract checker was executed against all 10 registered tables:
+The shared contract checker was executed locally against all 10 registered tables:
 
 ```json
 {
@@ -163,40 +179,45 @@ The shared contract checker was executed against all 10 registered tables:
     {"table": "demand_metrics", "owner": "member1", "rows": 6, "status": "ok", "problems": []},
     {"table": "priority_scores", "owner": "member3", "rows": 612, "status": "ok", "problems": []},
     {"table": "priority_backtest", "owner": "member3", "rows": 108, "status": "ok", "problems": []},
-    {"table": "pattern_rules", "owner": "member2", "rows": 3, "status": "fixture", "problems": ["fixture-only"]},
-    {"table": "frequent_itemsets", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only"]},
-    {"table": "mining_threshold_experiments", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only"]},
-    {"table": "resolution_summary", "owner": "member2", "rows": 3, "status": "fixture", "problems": ["fixture-only"]},
-    {"table": "closure_model_comparison", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only"]},
-    {"table": "closure_cohort_predictions", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only"]}
+    {"table": "pattern_rules", "owner": "member2", "rows": 3, "status": "fixture", "problems": ["fixture-only: real output not produced yet"]},
+    {"table": "frequent_itemsets", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only: real output not produced yet"]},
+    {"table": "mining_threshold_experiments", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only: real output not produced yet"]},
+    {"table": "resolution_summary", "owner": "member2", "rows": 3, "status": "fixture", "problems": ["fixture-only: real output not produced yet"]},
+    {"table": "closure_model_comparison", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only: real output not produced yet"]},
+    {"table": "closure_cohort_predictions", "owner": "member2", "rows": 2, "status": "fixture", "problems": ["fixture-only: real output not produced yet"]}
   ]
 }
 ```
 
-### Analysis of Audit Status
-- **Member 1 (Developer A):** Both contracts (`demand_forecast`, `demand_metrics`) are **`status: "ok"`** (100% complete, 0 problems, 0 warnings).
-- **Member 3 (Developer C):** Both contracts (`priority_scores`, `priority_backtest`) are **`status: "ok"`** (100% complete, 0 problems, 0 warnings).
-- **Member 2 (Developer B):** Contracts remain `status: "fixture"`, pending Member 2 production exports.
-- **Exit Code Note:** `check_outputs.py` returns exit code 1 because Member 2 tables are fixtures. The strict all-contract verification gate will pass when all three workstreams have published production outputs.
+### Analysis of Audit Status & Team Verification Boundary
+- **Real Tables:** Exactly **4/10 tables** (`demand_forecast`, `demand_metrics`, `priority_scores`, `priority_backtest`) are `status: "ok"` and backed by real data.
+- **Fixture-Backed Tables:** Exactly **6/10 tables** belong to Member 2 and remain `status: "fixture"`.
+- **Exit Code 1 Explanation:** `check_outputs.py` returns exit code 1 because Member 2 tables are fixture-backed. **Full-team strict verification (10/10 tables OK, exit code 0) must be completed after combining real artifacts from all workstreams.**
 
 ---
 
-## 6. Automated Integration Tests (`tests/integration/test_member1_member3_handoff.py`)
+## 6. Reproducible Execution Receipt & Test Suite Breakdown
 
-A new, comprehensive integration test suite was created and verified:
+### Execution Receipt
 
-| Test Name | Target Verified | Status |
-|---|---|---|
-| `test_real_demand_forecast_consumed_by_priority_engine` | Asserts `ps.source == ad.REAL`, `demand_model_units == 15`, `demand_source` matches model version, window dates align, and numerical values match. | **PASSED** |
-| `test_priority_scores_guards_against_double_counting_all` | Asserts `complaint_type == 'ALL'` is never scored as a unit, units = 612, and priority scores are bounded in $[0, 1]$. | **PASSED** |
-| `test_dashboard_demand_and_priority_contracts_load_as_real` | Asserts all 4 Member 1 and Member 3 contracts load as `ad.REAL`, usable, with 0 problems. | **PASSED** |
-| `test_synthetic_demand_to_priority_handoff_and_override` | Verifies the end-to-end handoff and override logic in synthetic/mock environments, ensuring clean execution on CI runners. | **PASSED** |
+| Parameter | Verified Measurement / Receipt |
+|---|---|
+| **Priority CLI Command** | `python scripts/run_member3_priorities.py --config configs/sample.yaml --input data/processed/member1_history --location-type borough` |
+| **Raw History Source Hash** | `3a6a21ea0b32710b39619f54fdbb34eaca75c50e5b351df7a888eee5f2a9f22e` (`data/raw/member1_history/manifest.json`) |
+| **Selected Forecast Model** | `seasonal_naive` (fit cutoff `2024-02-29`, version `demand-v2-seasonal_naive-2024-02-29`) |
+| **Scoring Window** | `2024-02-23` to `2024-02-29` (7 days); Cutoff = `2024-03-01` |
+| **Forecast Horizon** | `2024-03-01` to `2024-03-07` (consecutive 7 days, exactly matches cutoff) |
+| **Scored Units Breakdown** | 612 borough/category pairs (15 model-enhanced pairs, 597 observed-demand pairs) |
+| **Demand Value Parity** | Max absolute difference = `0.0` between `demand_forecast` 7-day average and `priority_scores.demand_value` |
+| **Dashboard AppTest Result** | Headless Streamlit execution of `forecasts.py` and `priorities.py` rendered cleanly with 0 exceptions and `REAL` badges |
+| **Contract Output Statuses** | `demand_forecast` (ok, 147 rows), `demand_metrics` (ok, 6 rows), `priority_scores` (ok, 612 rows), `priority_backtest` (ok, 108 rows) |
 
-**Execution Result:**
-```
-pytest -v tests/integration/test_member1_member3_handoff.py
-4 passed, 1 warning in 2.91s (100% pass rate)
-```
+### Test Suite Reconciliation: Local Environment vs. Clean GitHub CI
+
+| Environment | Command | Passed | Skipped | Deselected | Warnings | Runtime | Notes |
+|---|---|---|---|---|---|---|---|
+| **Local Workspace** | `pytest -v tests/integration/test_member1_member3_handoff.py` | **5** | 0 | 0 | 0 | 2.08s | All 5 handoff and double-counting tests execute against real artifacts. |
+| **Clean GitHub CI** | PR Workflow [`42448073126`](https://github.com/thenithin342/urban-service-intelligence/actions/runs/42448073126) | **276** | **37** | **1** | 161 | 3m 04s | Real-data tests skip cleanly (`"real demand_forecast and priority_scores contracts absent"`); synthetic handoff tests execute and pass. |
 
 ---
 
